@@ -1,0 +1,85 @@
+{
+  "name": "EcoSense Weekly Compliance Reports",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "cron-weekly",
+      "name": "Weekly Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        260,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "command": "python \"d:/EcoSense LG/scripts/company_automation.py\" --query \"Provide weekly operational priorities and compliance-ready summary.\""
+      },
+      "id": "run-automation",
+      "name": "Run EcoSense Automation",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        520,
+        280
+      ]
+    },
+    {
+      "parameters": {
+        "fromEmail": "ops@yourcompany.com",
+        "toEmail": "energy-team@yourcompany.com",
+        "subject": "EcoSense Weekly Building Reports Generated",
+        "emailType": "text",
+        "message": "EcoSense weekly automation completed. Check outputs/automation for summary JSON and outputs/reports for PDFs."
+      },
+      "id": "notify-email",
+      "name": "Send Ops Email",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        780,
+        280
+      ]
+    }
+  ],
+  "connections": {
+    "Weekly Trigger": {
+      "main": [
+        [
+          {
+            "node": "Run EcoSense Automation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run EcoSense Automation": {
+      "main": [
+        [
+          {
+            "node": "Send Ops Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "pinData": {}
+}

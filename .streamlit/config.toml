@@ -1,0 +1,15 @@
+# EcoSense dashboard — sidebar + widgets use Streamlit theme (overrides custom CSS when applied).
+# If colors do not update: Settings (⋮) → Theme → choose a custom theme or restart Streamlit from this repo root.
+
+[theme]
+base = "light"
+primaryColor = "#dc2626"
+backgroundColor = "#f0fdf4"
+textColor = "#000000"
+secondaryBackgroundColor = "#ffffff"
+
+[theme.sidebar]
+backgroundColor = "#d1fae5"
+textColor = "#000000"
+primaryColor = "#dc2626"
+secondaryBackgroundColor = "#ffffff"

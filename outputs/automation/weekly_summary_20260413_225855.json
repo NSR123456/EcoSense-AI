@@ -1,0 +1,15 @@
+{
+  "generated_at": "2026-04-13T22:59:15.402018",
+  "query": "Provide weekly operational priorities and compliance-ready summary.",
+  "building_count": 1,
+  "results": [
+    {
+      "building_id": "B001",
+      "risk": "High (anomalies=9, variability=0.16)",
+      "top_issue": "High anomaly frequency (confidence=88%)",
+      "top_action": "Continue monitoring",
+      "confidence": 89,
+      "report_path": "D:\\EcoSense LG\\src\\report\\..\\..\\outputs\\reports\\ecosense_report_20260413_225915.pdf"
+    }
+  ]
+}
