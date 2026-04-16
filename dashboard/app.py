@@ -3,6 +3,7 @@ import sys
 import inspect
 import io
 import re
+import requests
 import pandas as pd
 import streamlit as st
 
@@ -12,8 +13,10 @@ if ROOT not in sys.path:
 
 from src.graph.workflow import run_workflow
 from src.tools.evaluation_tools import evaluate_response
-from src.tools.reporting_tools import build_pdf
+from src.tools.reporting_tools import build_pdf, send_report_email
+from src.llm.client import generate_with_gemini
 
+from dashboard.ui.homepage import render_homepage
 from dashboard.ui.decision_cards import (
     render_decision_cards,
     render_issues_ui,
@@ -22,12 +25,14 @@ from dashboard.ui.decision_cards import (
 from dashboard.ui.agent_theater import render_agent_theater
 from dashboard.ui.evidence_panel import render_evidence_panel
 from dashboard.ui.simulator_panel import render_simulator_panel
+from dashboard.ui.v2_realtime import render_v2_realtime_ui
 from dashboard.ui.charts import render_consumption_chart, render_issue_bar
 from dashboard.ui.app_shell import inject_theme, render_assistant_brief, render_top_header
 from dashboard.ui.admin_ops import render_session_badge
 from dashboard.building_store import all_building_ids, load_energy_dataset
 from dashboard.paths import METADATA_PATH
 from dashboard.user_store import authenticate
+from src.services.automation_services import update_visualization_alert
 
 st.set_page_config(page_title="EcoSense AI", page_icon="🌿", layout="wide")
 inject_theme()
@@ -354,7 +359,6 @@ with st.sidebar:
             else:
                 st.error("Invalid username or password.")
         st.caption("Default demo users: admin / operator1 / operator2")
-        st.stop()
     else:
         render_session_badge(st.session_state["auth_user"], st.session_state["auth_role"])
         if st.button("Logout", key="logout_btn", type="primary", width="stretch"):
@@ -362,8 +366,13 @@ with st.sidebar:
             st.session_state["auth_role"] = None
             st.rerun()
 
+if st.session_state["auth_user"] is None:
+    render_homepage()
+    st.stop()
+
+with st.sidebar:
     st.header("Controls")
-    analysis_mode = st.radio("Analysis mode", ["Building-based", "Upload-only"], index=0)
+    analysis_mode = st.radio("Analysis mode", ["Building-based", "Upload-only", "v2 Real-time (Google Sheets)"], index=0)
     building_id = None
     if analysis_mode == "Building-based":
         building_id = st.selectbox("Select building", building_ids)
@@ -399,7 +408,7 @@ if reset_result:
     st.session_state.pop("result", None)
     st.session_state.pop("last_run_query", None)
     st.session_state.pop("last_run_building", None)
-    for k in ("agent_conv_key", "agent_live_count", "agent_user_thread", "agent_step_cursor", "pdf_path"):
+    for k in ("agent_conv_key", "agent_live_count", "agent_user_thread", "agent_step_cursor", "pdf_path", "awaiting_report_permission", "last_mm_inputs", "last_operator_note"):
         st.session_state.pop(k, None)
     st.success("Cleared previous result. Run workflow again.")
 
@@ -427,12 +436,29 @@ if run:
     st.session_state["result"] = result
     st.session_state["last_run_query"] = query
     st.session_state["last_run_building"] = building_id
+    st.session_state["awaiting_report_permission"] = True  # New state for permission flow
+    
+    # Auto-scroll to results using JS injection
+    st.markdown(
+        """
+        <script>
+        var mainContainer = window.parent.document.querySelector('section.main');
+        if (mainContainer) {
+            mainContainer.scrollTo({
+                top: mainContainer.scrollHeight,
+                behavior: 'smooth'
+            });
+        }
+        </script>
+        """,
+        unsafe_allow_html=True
+    )
 
 result = st.session_state.get("result")
 _building_label = (
     str(building_id)
     if analysis_mode == "Building-based" and building_id
-    else ("Upload-only" if analysis_mode == "Upload-only" else None)
+    else ("Upload-only" if analysis_mode == "Upload-only" else ("Real-time Audit" if analysis_mode == "v2 Real-time (Google Sheets)" else None))
 )
 render_top_header(
     user=str(st.session_state.get("auth_user") or ""),
@@ -440,7 +466,9 @@ render_top_header(
     has_result=bool(result),
 )
 
-if result:
+if analysis_mode == "v2 Real-time (Google Sheets)":
+    render_v2_realtime_ui()
+elif result:
     resp = result.get("final_response", {})
     # Backward compatibility: upgrade old cached cause wording in session results.
     if resp.get("cause_card", {}).get("value") == "daily usage is inconsistent":
@@ -463,17 +491,52 @@ if result:
     simple = resp.get("simple", "")
     evaluation = evaluate_response(technical, simple)
 
-    tabs = st.tabs([
-        "Decision Center",
-        "Agent Theater",
-        "Evidence",
-        "Simulator",
-        "Evaluation & Report"
-    ])
-
-    # Decision Center
-    with tabs[0]:
+    # Tab state management to prevent unwanted switching
+    tab_names = ["Decision Center", "Agent Theater", "Evaluation & Report"]
+    if "active_tab" not in st.session_state:
+        st.session_state.active_tab = 0
+    
+    # Tab selector that maintains state
+    st.markdown("---")
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col1:
+        if st.button("🏠 Decision Center", use_container_width=True, 
+                    type="primary" if st.session_state.active_tab == 0 else "secondary"):
+            st.session_state.active_tab = 0
+            st.rerun()
+    with col2:
+        if st.button("🎭 Agent Theater", use_container_width=True,
+                    type="primary" if st.session_state.active_tab == 1 else "secondary"):
+            st.session_state.active_tab = 1
+            st.rerun()
+    with col3:
+        if st.button("📊 Evaluation & Report", use_container_width=True,
+                    type="primary" if st.session_state.active_tab == 2 else "secondary"):
+            st.session_state.active_tab = 2
+            st.rerun()
+    st.markdown("---")
+    
+    # Display selected tab content
+    if st.session_state.active_tab == 0:
         render_decision_cards(resp)
+        
+        # Integrated 3D Agent Simulation
+        st.divider()
+        metrics = result.get("metrics", result.get("final_response", {}).get("metrics"))
+        insights = result.get("insights", {})
+        if not metrics:
+            metrics = result.get("metrics", {})
+        if not insights:
+            insights = result.get("insights", {})
+        # fallback from workflow state
+        metrics = result.get("metrics", metrics or {})
+        insights = result.get("insights", insights or {})
+
+        if metrics:
+            render_simulator_panel(metrics, insights, resp)
+        else:
+            st.info("No metrics available for simulation.")
+        st.divider()
 
         c1, c2 = st.columns([1, 1])
 
@@ -497,42 +560,60 @@ if result:
             with right_tabs[0]:
                 render_issues_ui(resp.get("issues", []))
             with right_tabs[1]:
-                render_actions_ui(resp.get("actions", []))
+                render_actions_ui(resp.get("actions", []), building_id=building_id)
 
-    # Agent Theater
-    with tabs[1]:
-        render_agent_theater(resp.get("messages", []), resp)
-
-    # Evidence
-    with tabs[2]:
+        # Key Insights & Evidence
+        st.divider()
+        st.subheader("🔍 Key Insights & Evidence")
+        
         retrieval_meta = resp.get("retrieval_meta", {})
-        e1, e2, e3 = st.columns(3)
-        with e1:
-            rag_count = int(retrieval_meta.get("bm25_count", 0)) + int(retrieval_meta.get("vector_count", 0))
-            st.metric("RAG Evidence", rag_count)
-        with e2:
-            st.metric("Statistical Evidence", retrieval_meta.get("statistical_count", 0))
-        with e3:
-            st.metric("Multimodal Evidence", retrieval_meta.get("multimodal_count", 0))
+        rag_count = int(retrieval_meta.get("bm25_count", 0)) + int(retrieval_meta.get("vector_count", 0))
+        stat_count = retrieval_meta.get("statistical_count", 0)
+        mm_count = int(retrieval_meta.get("multimodal_count", 0) or 0)
+        
+        # Simple evidence summary
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("📚 Knowledge Sources", rag_count, help="AI knowledge and best practices used")
+        with col2:
+            st.metric("📊 Data Analysis", stat_count, help="Statistical patterns found")
+        with col3:
+            st.metric("📎 File Insights", mm_count, help="Uploaded documents and images analyzed")
+        
+        # Show key evidence in simple language
+        evidence = resp.get("evidence", [])
+        if evidence:
+            st.markdown("**What the AI found helpful:**")
+            # Group evidence by type and show top insights
+            rag_evidence = [e for e in evidence if 'bm25' in str(e.get('source', '')).lower() or 'vector' in str(e.get('source', '')).lower()]
+            stat_evidence = [e for e in evidence if 'statistical' in str(e.get('source', '')).lower()]
+            
+            if rag_evidence:
+                with st.expander("💡 Smart Recommendations", expanded=True):
+                    for i, ev in enumerate(rag_evidence[:3], 1):  # Show top 3
+                        text = ev.get('text', '')
+                        # Simplify the language
+                        simple_text = text.replace('should prioritize', 'focus on').replace('buildings with', 'buildings that have')
+                        st.markdown(f"• {simple_text}")
+            
+            if stat_evidence:
+                with st.expander("📈 Energy Patterns Found", expanded=True):
+                    for ev in stat_evidence:
+                        text = ev.get('text', '')
+                        # Make stats more readable
+                        if 'avg=' in text:
+                            st.markdown(f"• **Average consumption:** {text.split('avg=')[1].split(',')[0]} kWh per day")
+                        elif 'variability ratio' in text:
+                            ratio = text.split('variability ratio=')[1].split(',')[0]
+                            st.markdown(f"• **Energy consistency:** {ratio} (lower is more stable)")
+                        elif 'anomalies=' in text:
+                            count = text.split('anomalies=')[1].split(',')[0]
+                            st.markdown(f"• **Unusual days:** {count} days with abnormal usage")
+                        else:
+                            st.markdown(f"• {text}")
 
-        uploaded_meta = st.session_state.get("last_mm_inputs", [])
-        if uploaded_meta:
-            with st.expander("Uploaded Inputs (this run)", expanded=False):
-                for f in uploaded_meta:
-                    st.markdown(f"- `{f.get('name', 'file')}` ({f.get('type', 'unknown')}, {f.get('size', 0)} bytes)")
-                note = st.session_state.get("last_operator_note", "")
-                if note:
-                    st.caption(f"Operator note: {note}")
-
-            mm_count = int(retrieval_meta.get("multimodal_count", 0) or 0)
-            if mm_count == 0:
-                st.warning(
-                    "Files were uploaded but not reflected in evidence. "
-                    "Please click Run Decision Workflow after upload, and restart Streamlit if needed."
-                )
-
-        render_evidence_panel(resp.get("evidence", []))
-        st.subheader("Compliance")
+        # Compliance section (moved from separate tab)
+        st.subheader("✅ Energy Compliance Check")
         compliance = resp.get("compliance", {})
         if compliance and isinstance(compliance, dict) and any(compliance.values()):
             score = compliance.get("score")
@@ -541,43 +622,52 @@ if result:
             with c1:
                 st.metric("Compliance Score", score if score is not None else "N/A")
             with c2:
-                st.metric("Compliance Status", status)
+                st.metric("Status", status)
+                # Add NLP explanation for status
+                status_prompt = (
+                    f"Explain what a '{status}' compliance status means for building energy efficiency in simple terms. "
+                    "Keep it under 50 words, encouraging and actionable."
+                )
+                status_explanation = generate_with_gemini(status_prompt, safety_delay=1)
+                if status_explanation:
+                    st.caption(status_explanation)
 
             comp_evidence = compliance.get("evidence", [])
             if comp_evidence:
                 with st.expander("Compliance Evidence", expanded=False):
+                    # Generate NLP summary of evidence
+                    evidence_texts = [item.get("text", "") for item in comp_evidence if item.get("text")]
+                    if evidence_texts:
+                        summary_prompt = (
+                            f"Summarize these compliance evidence points in simple language for non-experts: {evidence_texts[:3]}. "
+                            "Explain what they mean for energy efficiency and building operations. Keep under 150 words."
+                        )
+                        summary = generate_with_gemini(summary_prompt, safety_delay=1)
+                        if summary:
+                            st.markdown(f"**Summary**: {summary}")
+                            st.divider()
                     for item in comp_evidence:
                         text = item.get("text", "")
                         src = item.get("source", "unknown")
                         st.markdown(f"- {text} (`{src}`)")
             else:
-                st.caption("No compliance evidence details for this run.")
+                st.caption("No specific compliance issues found.")
         else:
-            st.info("No compliance results for this run.")
-        if resp.get("comparison"):
-            st.subheader("Comparison")
-            st.json(resp.get("comparison", {}))
+            # Generate NLP-based explanation for no compliance results
+            explanation_prompt = (
+                "Explain in simple, everyday language why there might be no compliance results for this building energy analysis. "
+                "Keep it under 100 words, helpful, and reassuring. Focus on what compliance means for energy efficiency."
+            )
+            explanation = generate_with_gemini(explanation_prompt, safety_delay=1)
+            if explanation:
+                st.info(f"💡 **Compliance Insights**: {explanation}")
+            else:
+                st.info("No compliance results for this run.")
 
-    # Simulator
-    with tabs[3]:
-        metrics = result.get("metrics", result.get("final_response", {}).get("metrics"))
-        insights = result.get("insights", {})
-        if not metrics:
-            metrics = result.get("metrics", {})
-        if not insights:
-            insights = result.get("insights", {})
-        # fallback from workflow state
-        metrics = result.get("metrics", metrics or {})
-        insights = result.get("insights", insights or {})
+    elif st.session_state.active_tab == 1:
+        render_agent_theater(resp.get("messages", []), resp)
 
-        if metrics:
-            sim = render_simulator_panel(metrics, insights)
-            st.json(sim)
-        else:
-            st.info("No metrics available for simulation.")
-
-    # Evaluation & Report
-    with tabs[4]:
+    elif st.session_state.active_tab == 2:
         st.subheader("Decision Quality Check")
         quality = evaluation.get("quality", {}) if isinstance(evaluation, dict) else {}
         faithfulness = evaluation.get("faithfulness", {}) if isinstance(evaluation, dict) else {}
@@ -627,6 +717,33 @@ if result:
             st.session_state["pdf_path"] = pdf_path
             st.success(f"Report generated: {os.path.basename(pdf_path)}")
 
+        # --- Python-based VISUALIZATION ENGINE ---
+        if st.button("📊 Update Consumption Alert", key="viz_btn", help="Send live metrics to the Telegram via Python"):
+            with st.spinner("Updating visualization..."):
+                metrics = result.get("metrics", {})
+                actual = metrics.get("avg_consumption", 0.0)
+                
+                # Try to get estimated savings to calculate optimized value
+                savings_kwh = 0.0
+                if "insights" in result:
+                    from src.core.reasoning import estimate_savings
+                    savings = estimate_savings(metrics, result["insights"])
+                    savings_kwh = savings.get("estimated_daily_kwh", 0.0)
+                
+                optimized = actual - savings_kwh
+                
+                viz_res = update_visualization_alert(
+                    building_id=building_id or "All Buildings",
+                    actual=actual,
+                    optimized=optimized
+                )
+                
+                if viz_res["status"] == "success":
+                    st.success("Alert updated successfully!")
+                else:
+                    st.error(viz_res["message"])
+        # ---------------------------------
+
         pdf_path = st.session_state.get("pdf_path")
         if pdf_path and os.path.exists(pdf_path):
             with open(pdf_path, "rb") as f:
@@ -638,3 +755,29 @@ if result:
                     key="download_pdf",
                     type="primary",
                 )
+
+    # Automated PDF and Notification Flow
+    if st.session_state.get("awaiting_report_permission") and result:
+        st.divider()
+        st.subheader("📋 Finalize Decision")
+        st.write("The analysis is complete. Would you like to generate the official PDF report and notify the database team?")
+        
+        c1, c2 = st.columns([1, 4])
+        with c1:
+            if st.button("✅ Yes, Generate & Send", type="primary", use_container_width=True):
+                with st.spinner("Generating PDF and logging to database..."):
+                    pdf_path = build_pdf(result)
+                    st.session_state["pdf_path"] = pdf_path
+                    
+                    # Send simulated email/log to database
+                    user = st.session_state.get("auth_user", "Unknown User")
+                    success = send_report_email(result, pdf_path, user)
+                    
+                    if success:
+                        st.success(f"Report generated and database notified successfully! {os.path.basename(pdf_path)}")
+                        st.session_state["awaiting_report_permission"] = False
+                        st.rerun()
+        with c2:
+            if st.button("❌ No, Just View Results", use_container_width=True):
+                st.session_state["awaiting_report_permission"] = False
+                st.rerun()

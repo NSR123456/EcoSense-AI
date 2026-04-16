@@ -18,6 +18,7 @@ def inject_theme() -> None:
         /* Fonts only — colors come from .streamlit/config.toml [theme] / [theme.sidebar]. */
         .stApp {
             font-family: "DM Sans", system-ui, -apple-system, sans-serif;
+            scroll-behavior: smooth;
         }
 
         /* Backup: soft green sidebar shell only (do not paint every nested div — keeps inputs white). */

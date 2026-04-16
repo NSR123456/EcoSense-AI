@@ -1,7 +1,27 @@
 import html
-
 import streamlit as st
+from src.services.automation_services import log_action_to_sheets, send_telegram_alert
 
+def _send_action_to_n8n(action_details: dict):
+    building_id = action_details.get("building_id") or "Unknown"
+    source_doc = action_details.get("source_doc") or "EcoSense Analysis"
+    finding_type = action_details.get("finding_type") or "Energy Optimization"
+    savings_kwh = action_details.get("savings_kwh") or 0.0
+    action = action_details.get("action") or action_details.get("title") or "Unknown"
+
+    # Call Logging Service (Python-based)
+    log_res = log_action_to_sheets(building_id, source_doc, finding_type, savings_kwh, action)
+    if log_res["status"] == "success":
+        st.success(f"Action '{action}' logged to Google Sheets!")
+    else:
+        st.error(log_res["message"])
+
+    # Call Alerting Service (Python-based)
+    alert_res = send_telegram_alert(building_id, source_doc, finding_type, savings_kwh, action)
+    if alert_res["status"] == "success":
+        st.info(f"Telegram alert sent for '{action}'!")
+    else:
+        st.error(alert_res["message"])
 
 def _computed_risk_text(resp: dict) -> str:
     issues = resp.get("issues", [])
@@ -152,7 +172,7 @@ def render_issues_ui(issues: list):
                 st.caption("Confidence: N/A")
 
 
-def render_actions_ui(actions: list):
+def render_actions_ui(actions: list, building_id: str = None):
     if not actions:
         st.info("No recommended actions.")
         return
@@ -172,3 +192,18 @@ def render_actions_ui(actions: list):
                 f":{_label_color(impact)}[Impact: {impact.title()}]"
             )
             st.caption(f"When: {when.title()}")
+            
+            # Add "Assign this task" button
+            if st.button(
+                f"Assign '{title}'",
+                key=f"assign_action_{idx}",
+                help="Log action and trigger alert via n8n."
+            ):
+                action_details = {
+                    "action": title,
+                    "building_id": building_id,
+                    "source_doc": "EcoSense Report",
+                    "finding_type": impact.title(),
+                    "savings_kwh": 0.0, # Placeholder
+                }
+                _send_action_to_n8n(action_details)

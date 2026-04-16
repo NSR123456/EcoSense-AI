@@ -26,21 +26,21 @@ ICONS = {
 }
 
 TYPE_LABELS = {
-    "plan": "Plan made",
-    "finding": "Problem found",
-    "proposal": "Action suggested",
-    "critique": "Quality check",
-    "decision": "Final decision",
-    "info": "Update",
+    "plan": "Planning Complete",
+    "finding": "Problems Found",
+    "proposal": "Action Suggested",
+    "critique": "Quality Check Done",
+    "decision": "Final Decision Ready",
+    "info": "System Update",
 }
 
 ROLE_DESCRIPTIONS = {
-    "Planner": "Chooses workflow route and ordering",
-    "DetectIssues": "Finds energy problems from data patterns",
-    "RootCause": "Explains why the problem likely happened",
-    "ActionPlanner": "Builds practical operator actions",
-    "Critic": "Checks safety, quality, and consistency",
-    "Synthesizer": "Combines all results into final advice",
+    "Planner": "Chooses the best way to analyze your building's energy use",
+    "DetectIssues": "Finds unusual energy patterns and problems",
+    "RootCause": "Figures out why energy problems are happening",
+    "ActionPlanner": "Suggests practical steps to fix energy issues",
+    "Critic": "Double-checks recommendations for safety and quality",
+    "Synthesizer": "Puts everything together into one clear action plan",
 }
 
 
@@ -58,14 +58,16 @@ def _step_index(agent: str) -> int:
 
 def _next_step_hint(agent: str, mtype: str) -> str:
     if mtype == "proposal":
-        return "Next step: Start this action first."
+        return "💡 **What to do next:** Start this recommended action today for the best energy savings."
     if mtype == "decision":
-        return "Next step: Follow the decision on the Decision Center tab."
+        return "✅ **What to do next:** Go to the Decision Center tab to see the full action plan and start implementing."
     if mtype == "finding":
-        return "Next step: Review severity and confidence, then prioritize."
+        return "🔍 **What to do next:** Look at the severity levels - focus on 'Urgent' issues first, then review confidence levels."
     if agent == "Critic":
-        return "Next step: If critiques appear, revise before execution."
-    return "Next step: Continue to the next card."
+        return "🛠️ **What to do next:** If any quality concerns are shown, the system will automatically improve the recommendations."
+    if agent == "Synthesizer":
+        return "📋 **What to do next:** The analysis is complete! Check the Decision Center for your final action plan."
+    return "➡️ **What to do next:** Continue reading to see the complete analysis."
 
 
 def _operator_text(agent: str, content: str) -> str:
@@ -255,6 +257,54 @@ def _agent_specific_value(agent: str, content: str) -> str:
     return txt
 
 
+def _get_operator_guidance(agent: str, content: str) -> str:
+    """Provide specific guidance for operators based on agent type and content."""
+    if agent == "Planner":
+        return "This shows how the system thinks step-by-step. Next agents will follow this plan to give you the best analysis."
+    elif agent == "DetectIssues":
+        if "anomalies=" in content:
+            anomaly_count = content.split("anomalies=")[1].split(",")[0].strip()
+            return f"There are {anomaly_count} unusual energy patterns. Focus on the high-severity issues first - they need immediate attention."
+        return "Energy problems found. Check the severity levels - red/urgent issues should be fixed soon to save energy costs."
+    elif agent == "RootCause":
+        return "This explains WHY the energy problem exists. Use this to understand the real issue, not just symptoms."
+    elif agent == "ActionPlanner":
+        return "This is your action plan! Start with the highest priority items. Each action tells you what to do and why it's important."
+    elif agent == "Critic":
+        if "0" in content and "critique" in content:
+            return "Quality check passed! The recommendations are safe and reliable. You can confidently implement them."
+        return "The system found some concerns. Don't worry - it will automatically improve the recommendations."
+    elif agent == "Synthesizer":
+        return "This is your complete energy action plan. Go to Decision Center to see all recommendations and start implementing."
+    else:
+        return "This is a system update. Continue reading to see the complete analysis."
+
+
+def _generate_simple_explanation(agent: str, content: str) -> str:
+    """Use LLM to generate simple explanations for technical agent outputs."""
+    if not content or content.strip() == "":
+        return ""
+    
+    # Create a prompt based on the agent type and content
+    if agent == "Planner":
+        prompt = f"Explain this technical planning decision in 1-2 simple sentences for a building operator: '{content}'. Focus on what route was chosen and why it's good for energy analysis."
+    elif agent == "DetectIssues":
+        prompt = f"Explain these energy issues in simple terms for a building operator: '{content}'. What problems were found and what do they mean for daily operations?"
+    elif agent == "RootCause":
+        prompt = f"Explain this root cause analysis in simple terms: '{content}'. What is the likely reason for the energy problem?"
+    elif agent == "ActionPlanner":
+        prompt = f"Explain this action recommendation in simple terms for a building operator: '{content}'. What should they do and why is it urgent?"
+    elif agent == "Critic":
+        prompt = f"Explain this quality check result in simple terms: '{content}'. Is the advice safe and reliable?"
+    elif agent == "Synthesizer":
+        prompt = f"Explain this final decision in simple terms for a building operator: '{content}'. What is the main recommendation?"
+    else:
+        prompt = f"Explain this technical update in simple terms: '{content}'. What does it mean for the operator?"
+    
+    explanation = generate(prompt, max_length=100)
+    return explanation if explanation else ""
+
+
 def _film_line(agent: str, content: str) -> str:
     if agent == "Planner":
         return "I picked the best analysis route for this building."
@@ -282,19 +332,37 @@ def _film_detail_line(agent: str, content: str) -> str:
             route = text.split("Selected route:", 1)[1].split(";", 1)[0].strip()
         if "nodes:" in text:
             nodes = text.split("nodes:", 1)[1].strip()
+            # Convert technical node names to simple descriptions
+            node_descriptions = {
+                "retrieval": "Gather knowledge",
+                "detect_issues": "Find problems", 
+                "root_cause": "Find reasons",
+                "action_planner": "Plan actions",
+                "critic": "Check quality",
+                "synthesizer": "Create summary"
+            }
+            simple_nodes = []
+            for node in nodes.replace("[", "").replace("]", "").replace("'", "").split(","):
+                node = node.strip()
+                simple_nodes.append(node_descriptions.get(node, node))
+            nodes = str(simple_nodes)
         if nodes:
-            return f"Route: {route} | Flow: {nodes}"
-        return f"Route: {route}"
+            return f"Analysis approach: {route} | Process steps: {nodes}"
+        return f"Analysis approach: {route}"
     if agent == "DetectIssues":
-        return text.replace("Detected", "Detected:")
+        # Make issue detection more readable
+        text = text.replace("Detected", "Found:")
+        text = text.replace("anomalies=", "unusual readings: ")
+        text = text.replace("trend=", "usage pattern: ")
+        return text
     if agent == "RootCause":
-        return text.replace("Top cause:", "Likely cause:")
+        return text.replace("Top cause:", "Most likely reason:")
     if agent == "ActionPlanner":
-        return text.replace("Top action:", "Priority action:")
+        return text.replace("Top action:", "Recommended action:")
     if agent == "Critic":
-        return text.replace("Critiques:", "Quality alerts:")
+        return text.replace("Critiques:", "Quality concerns:")
     if agent == "Synthesizer":
-        return text.replace("Finalized response", "Final output")
+        return text.replace("Finalized response", "Final recommendation")
     return text
 
 
@@ -797,6 +865,18 @@ def render_agent_theater(messages: list, resp: dict | None = None):
             st.markdown(f"**{agent} · {mtype}**")
             st.markdown(main_line)
             st.markdown(f"**My role:** {role}")
+            
+            # Add LLM-generated simple explanation
+            simple_explanation = _generate_simple_explanation(agent, str(m.get("content", "")))
+            if simple_explanation:
+                with st.expander("💡 Simple Explanation (What this means for you)", expanded=False):
+                    st.markdown(simple_explanation)
+            
+            # Add learning/action guidance
+            guidance = _get_operator_guidance(agent, str(m.get("content", "")))
+            if guidance:
+                st.info(f"📝 **What to learn:** {guidance}")
+            
             for c in chunks:
                 st.markdown(f"- {c}")
 
@@ -805,17 +885,31 @@ def render_agent_theater(messages: list, resp: dict | None = None):
                 metrics = (resp or {}).get("metrics", {}) if isinstance(resp, dict) else {}
                 anomaly_count = metrics.get("anomaly_count")
                 if issue_list:
-                    st.markdown("**Detected issue details:**")
+                    st.markdown("**🔍 What problems I found:**")
                     for issue in issue_list:
                         name = issue.get("name", "Unnamed issue")
                         sev = str(issue.get("severity", "unknown")).title()
                         conf = issue.get("confidence")
                         conf_text = f"{int(round(conf * 100))}%" if isinstance(conf, (int, float)) else "N/A"
-                        st.markdown(f"- {name} | Severity: {sev} | Confidence: {conf_text}")
+                        
+                        # Make severity more understandable
+                        sev_explanation = {
+                            "High": "⚠️ Urgent - Fix soon to save energy",
+                            "Medium": "🟡 Important - Address when possible", 
+                            "Low": "ℹ️ Minor - Monitor but not critical"
+                        }.get(sev, f"Severity: {sev}")
+                        
+                        # Make confidence more understandable
+                        conf_level = "Very sure" if isinstance(conf, (int, float)) and conf > 0.8 else "Fairly sure" if isinstance(conf, (int, float)) and conf > 0.6 else "Somewhat sure"
+                        
+                        st.markdown(f"• **{name}**")
+                        st.markdown(f"  - {sev_explanation}")
+                        st.markdown(f"  - **How sure I am:** {conf_level} ({conf_text})")
                 if anomaly_count is not None:
+                    anomaly_explanation = "unusual energy readings" if anomaly_count < 20 else "many unusual energy readings" if anomaly_count < 50 else "very many unusual energy readings"
                     st.markdown(
-                        f"**Anomalies explained:** {anomaly_count} unusual readings were detected "
-                        "compared with expected energy behavior."
+                        f"**📊 Energy pattern analysis:** Found {anomaly_count} {anomaly_explanation} "
+                        "that don't match normal building usage."
                     )
 
             if agent == "ActionPlanner":

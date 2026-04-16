@@ -37,7 +37,8 @@ def simulate_energy_actions(metrics: dict, insights: dict, scenario: dict) -> di
         0.20 * reduce_variability_pct +
         0.40 * efficiency_upgrade_pct
     )
-    overall_reduction = min(overall_reduction, 0.35)
+    # Increase cap to allow for more dramatic simulation feedback
+    overall_reduction = min(overall_reduction, 0.85)
 
     new_avg = avg_val * (1 - overall_reduction)
     new_anomalies = max(0, int(round(anomaly_count * (1 - reduce_peak_pct - reduce_variability_pct * 0.5))))

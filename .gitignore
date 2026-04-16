@@ -1,2 +1,4 @@
 data/sample/users.csv
 data/sample/building_metadata.csv
+service_account.json
+.env

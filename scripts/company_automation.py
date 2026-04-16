@@ -67,18 +67,20 @@ def main():
         except Exception as exc:
             summaries.append({"building_id": bid, "error": str(exc)})
 
+    summary_data = {
+        "generated_at": datetime.now().isoformat(),
+        "query": args.query,
+        "building_count": len(building_ids),
+        "results": summaries,
+    }
+
     summary_path = os.path.join(args.out, f"weekly_summary_{run_ts}.json")
     with open(summary_path, "w", encoding="utf-8") as f:
-        json.dump(
-            {
-                "generated_at": datetime.now().isoformat(),
-                "query": args.query,
-                "building_count": len(building_ids),
-                "results": summaries,
-            },
-            f,
-            indent=2,
-        )
+        json.dump(summary_data, f, indent=2)
+
+    latest_path = os.path.join(args.out, "latest_summary.json")
+    with open(latest_path, "w", encoding="utf-8") as f:
+        json.dump(summary_data, f, indent=2)
 
     print(f"Automation run complete. Summary saved: {summary_path}")
     for item in summaries:

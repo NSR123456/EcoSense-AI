@@ -1,0 +1,157 @@
+import os
+import pandas as pd
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+from google.auth.transport.requests import Request
+import google_auth_httplib2
+import httplib2
+from dotenv import load_dotenv
+
+load_dotenv()
+
+class DatabaseManager:
+    def __init__(self):
+        self.sheet_id = os.getenv("GOOGLE_SHEET_ID")
+        self.creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "service_account.json")
+        self.creds = None
+        if os.path.exists(self.creds_path):
+            self.creds = service_account.Credentials.from_service_account_file(
+                self.creds_path, scopes=["https://www.googleapis.com/auth/spreadsheets"]
+            )
+
+    def _get_service(self):
+        """Create a thread-safe service instance for each request."""
+        # httplib2 is not thread-safe, so we create a new one for every call
+        http_transport = httplib2.Http(timeout=30)
+        authorized_http = google_auth_httplib2.AuthorizedHttp(self.creds, http=http_transport)
+        return build("sheets", "v4", http=authorized_http, cache_discovery=False)
+
+    def initialize_workspace(self):
+        """Check and create required tabs in the Google Sheet."""
+        required_tabs = {
+            "Active_Stream": ["building_id", "date", "consumption_kwh", "is_faulty"],
+            "Campus_Schedule": ["event_name", "date", "start_time", "end_time", "description"],
+            "Audit_Ledger": ["timestamp", "building_id", "anomaly_type", "recommendation", "status"]
+        }
+
+        try:
+            service = self._get_service()
+            sheet_metadata = service.spreadsheets().get(spreadsheetId=self.sheet_id).execute()
+            existing_tabs = [sheet.get("properties", {}).get("title") for sheet in sheet_metadata.get("sheets", [])]
+
+            for tab_name, headers in required_tabs.items():
+                if tab_name not in existing_tabs:
+                    print(f"Creating tab: {tab_name}")
+                    batch_update_request = {
+                        "requests": [
+                            {
+                                "addSheet": {
+                                    "properties": {
+                                        "title": tab_name
+                                    }
+                                }
+                            }
+                        ]
+                    }
+                    service.spreadsheets().batchUpdate(
+                        spreadsheetId=self.sheet_id, body=batch_update_request
+                    ).execute()
+                    
+                    # Add headers
+                    self.write_rows(tab_name, [headers])
+                else:
+                    print(f"Tab already exists: {tab_name}")
+
+        except HttpError as err:
+            print(f"An error occurred during workspace init: {err}")
+
+    def write_headers(self, tab_name, headers):
+        """Force write headers to the first row."""
+        body = {"values": [headers]}
+        range_name = f"{tab_name}!A1"
+        try:
+            service = self._get_service()
+            service.spreadsheets().values().update(
+                spreadsheetId=self.sheet_id,
+                range=range_name,
+                valueInputOption="RAW",
+                body=body
+            ).execute()
+        except HttpError as err:
+            print(f"An error occurred writing headers to {tab_name}: {err}")
+
+    def write_rows(self, tab_name, rows):
+        """Append rows to a specific tab."""
+        body = {"values": rows}
+        range_name = f"{tab_name}!A1"
+        try:
+            service = self._get_service()
+            service.spreadsheets().values().append(
+                spreadsheetId=self.sheet_id,
+                range=range_name,
+                valueInputOption="RAW",
+                body=body
+            ).execute()
+        except HttpError as err:
+            print(f"An error occurred writing to {tab_name}: {err}")
+
+    def clear_tab(self, tab_name):
+        """Clear all data and force-restore headers from known config."""
+        required_headers = {
+            "Active_Stream": ["building_id", "date", "consumption_kwh", "is_faulty"],
+            "Campus_Schedule": ["event_name", "date", "start_time", "end_time", "description"],
+            "Audit_Ledger": ["timestamp", "building_id", "anomaly_type", "recommendation", "status"]
+        }
+        
+        try:
+            service = self._get_service()
+            # Clear everything
+            service.spreadsheets().values().clear(
+                spreadsheetId=self.sheet_id, range=f"{tab_name}!A1:Z1000"
+            ).execute()
+
+            # Restore headers from known config using update to ensure they are on row 1
+            if tab_name in required_headers:
+                print(f"Restoring headers for {tab_name}")
+                self.write_headers(tab_name, required_headers[tab_name])
+                
+        except HttpError as err:
+            print(f"An error occurred clearing {tab_name}: {err}")
+
+    def read_tab(self, tab_name):
+        """Read data from a tab as a list of dictionaries."""
+        try:
+            service = self._get_service()
+            result = service.spreadsheets().values().get(
+                spreadsheetId=self.sheet_id, range=f"{tab_name}!A1:Z1000"
+            ).execute()
+            values = result.get("values", [])
+            if not values:
+                return []
+            
+            headers = values[0]
+            rows = values[1:]
+            return [dict(zip(headers, row)) for row in rows]
+        except HttpError as err:
+            print(f"An error occurred reading {tab_name}: {err}")
+            return []
+
+    def seed_campus_schedule(self, events=None):
+        """Populate Campus_Schedule with dummy events."""
+        if events is None:
+            events = [
+                ["New Year Concert", "2024-01-01", "18:00", "22:00", "Annual campus concert in the auditorium"],
+                ["Energy Audit Workshop", "2024-01-05", "10:00", "12:00", "Workshop for campus staff on energy efficiency"],
+                ["Winter Sports Fest", "2024-01-10", "09:00", "17:00", "Sports event at the campus stadium"],
+                ["Board Meeting", "2024-01-15", "14:00", "16:00", "Quarterly board meeting in the admin block"],
+                ["Open Day", "2024-01-20", "10:00", "16:00", "Public open day for prospective students"],
+                ["Alumni Gala", "2024-01-25", "19:00", "23:00", "Alumni gala dinner in the auditorium"],
+                ["Exams Start", "2024-01-28", "08:00", "17:00", "Beginning of winter semester exams"]
+            ]
+        
+        print(f"Seeding Campus_Schedule with {len(events)} events.")
+        # Clear existing rows (except headers)
+        self.clear_tab("Campus_Schedule")
+        # Write headers back if clear_tab clears everything
+        self.write_rows("Campus_Schedule", events)

@@ -1,0 +1,3 @@
+timestamp,user,building_id,risk,report_path,status
+2026-04-14 11:33:23,admin,B001,"High (anomalies=9, variability=0.16)",D:\EcoSense LG\src\report\..\..\outputs\reports\ecosense_report_20260414_113323.pdf,Sent (Simulated)
+2026-04-15 18:50:43,admin,,"Low (anomalies=0, variability=0.00)",D:\EcoSense LG\src\report\..\..\outputs\reports\ecosense_report_20260415_185043.pdf,Sent (Simulated)
