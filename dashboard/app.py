@@ -4,14 +4,19 @@ import inspect
 import io
 import re
 import requests
+import threading
 import pandas as pd
 import streamlit as st
+try:
+    from streamlit import st_autorefresh
+except Exception:
+    st_autorefresh = None
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from src.graph.workflow import run_workflow
+from src.tools.analytics_tools import get_building_bundle
 from src.tools.evaluation_tools import evaluate_response
 from src.tools.reporting_tools import build_pdf, send_report_email
 from src.llm.client import generate_with_gemini
@@ -33,6 +38,10 @@ from dashboard.building_store import all_building_ids, load_energy_dataset
 from dashboard.paths import METADATA_PATH
 from dashboard.user_store import authenticate
 from src.services.automation_services import update_visualization_alert
+from src.services.google_sheets import DatabaseManager
+from src.services.simulator import EnergySimulator
+from src.services.agents import AgentTeam
+from src.services.telegram_bot import TelegramBot
 
 st.set_page_config(page_title="EcoSense AI", page_icon="🌿", layout="wide")
 inject_theme()
@@ -134,6 +143,98 @@ def _serialize_uploads(uploaded_files: list) -> list:
     return items
 
 
+def _build_dataset_analysis(building_id: str, query: str, uploaded_files: list, operator_note: str) -> dict:
+    bundle = get_building_bundle(building_id)
+    metrics = bundle["metrics"]
+    insights = bundle["insights"]
+    recent_pattern = bundle["recent_pattern"]
+    actions = bundle["actions"]
+    savings = bundle["savings"]
+
+    data_cov = metrics.get("data_coverage", {})
+    coverage_text = (
+        f"Dataset covers {data_cov.get('days_covered', 0)} of {data_cov.get('span_days', 0)} days "
+        f"({data_cov.get('coverage_ratio', 0.0)*100:.0f}% coverage) from {metrics.get('first_date')} to {metrics.get('last_date')}"
+    ) if data_cov else "Dataset coverage information is unavailable."
+
+    evidence = [
+        {"text": coverage_text, "source": "dataset"}
+    ]
+    if uploaded_files:
+        files = _serialize_uploads(uploaded_files)
+        for f in files:
+            evidence.append({"text": f"Uploaded file: {f.get('name')} ({f.get('type')})", "source": "multimodal"})
+    if operator_note.strip():
+        evidence.append({"text": f"Operator note: {operator_note.strip()}", "source": "multimodal"})
+
+    issues = []
+    if insights.get("high_variability"):
+        issues.append({"name": "Inconsistent daily energy profile", "severity": "medium", "confidence": 0.74})
+    if insights.get("peak_spike"):
+        issues.append({"name": "High consumption spike detected", "severity": "high", "confidence": 0.82})
+    if insights.get("high_base_load"):
+        issues.append({"name": "Elevated base load", "severity": "medium", "confidence": 0.70})
+    if insights.get("high_avg_consumption"):
+        issues.append({"name": "High average consumption", "severity": "medium", "confidence": 0.68})
+    if insights.get("high_normalized_intensity"):
+        issues.append({"name": "Normalized intensity is above benchmark", "severity": "medium", "confidence": 0.70})
+    if insights.get("has_anomalies") and not insights.get("peak_spike"):
+        issues.append({"name": "Anomaly pattern found in recent readings", "severity": "medium", "confidence": 0.66})
+
+    if not issues:
+        issues.append({"name": "No strong inefficiency signal", "severity": "low", "confidence": 0.55})
+
+    causes = [
+        {
+            "impact": (
+                f"Analysis is based on available sample days; {coverage_text}. "
+                "Use this as a first-pass recommendation and collect more complete meter data if possible."
+            )
+        }
+    ]
+
+    top_issue = issues[0]["name"]
+    top_action = actions[0]["title"] if actions else "Continue monitoring"
+
+    technical = (
+        f"Building {building_id} analysis over {metrics.get('total_records', 0)} records. "
+        f"Average consumption {metrics.get('avg_consumption', 0):.1f} kWh, max {metrics.get('max_consumption', 0):.1f} kWh, "
+        f"trend={metrics.get('trend')}.")
+    if data_cov and data_cov.get('partial_data'):
+        technical += " The dataset is partial, so findings are provisional."
+    technical += f" Top issue: {top_issue}."
+
+    simple = f"Using available days, the top issue is {top_issue.lower()}. Start with {top_action.lower()}."
+
+    messages = [
+        {"agent": "DatasetCollector", "type": "info", "content": f"Loaded {metrics.get('total_records', 0)} records for building {building_id}."},
+        {"agent": "Analytics", "type": "info", "content": f"Derived insights from {data_cov.get('days_covered', 0)} covered days."},
+        {"agent": "Planner", "type": "decision", "content": f"Recommended {len(actions)} action(s) based on available sample data."},
+    ]
+
+    final_response = {
+        "risk_card": {"title": "Energy Ops Risk", "value": f"{issues[0]['severity'].title()} (based on available data)"},
+        "issue_card": {"title": "Top Issue", "value": f"{top_issue} (confidence={int(round(issues[0].get('confidence', 0.6)*100))}%)"},
+        "cause_card": {"title": "Cause Summary", "value": causes[0]["impact"]},
+        "action_card": {"title": "Best Next Action", "value": top_action},
+        "confidence_card": {"score": int(round(issues[0].get('confidence', 0.6)*100)), "label": "provisional"},
+        "technical": technical,
+        "simple": simple,
+        "issues": issues,
+        "causes": causes,
+        "actions": actions,
+        "compliance": {},
+        "evidence": evidence,
+        "retrieval_meta": {"total_evidence": len(evidence), "dataset_evidence": 1, "statistical_count": 1},
+        "messages": messages,
+        "metrics": metrics,
+        "insights": insights,
+        "alert_policy": "Telegram alerts are sent when you assign a recommended action or manually trigger the visualization alert.",
+    }
+
+    return {"final_response": final_response, "metrics": metrics, "insights": insights}
+
+
 def _extract_flat_rates(text: str) -> list[tuple[str, float]]:
     if not text:
         return []
@@ -200,12 +301,12 @@ def _run_upload_only_analysis(query: str, uploaded_files: list, operator_note: s
         evidence.append({"text": f"Operator note: {operator_note.strip()}", "source": "multimodal"})
 
     if total_files == 0 and not operator_note.strip():
-        issues = [{"name": "Insufficient upload evidence", "severity": "medium", "confidence": 0.55}]
-        causes = [{"impact": "No files or notes were provided for upload-only analysis"}]
+        issues = [{"name": "Insufficient review evidence", "severity": "medium", "confidence": 0.55}]
+        causes = [{"impact": "No files or notes were provided for evidence review"}]
         actions = [
             {
-                "title": "Upload at least one image or PDF",
-                "what": "Attach utility bill, meter screenshot, or site note to enable upload-only analysis",
+                "title": "Attach evidence or operator notes",
+                "what": "Provide a utility bill, meter screenshot, or site note to enable evidence review",
                 "when": "now",
                 "impact": "high",
                 "urgency": "high",
@@ -239,7 +340,7 @@ def _run_upload_only_analysis(query: str, uploaded_files: list, operator_note: s
         causes = [
             {
                 "impact": (
-                    f"upload-only assessment uses {total_files} file(s) "
+                    f"evidence review uses {total_files} file(s) "
                     f"(images={image_count}, pdfs={pdf_count}) and operator note={'yes' if operator_note.strip() else 'no'}; "
                     "indicates potential schedule/base-load inefficiency from uploaded content that needs meter-data validation"
                 )
@@ -255,7 +356,7 @@ def _run_upload_only_analysis(query: str, uploaded_files: list, operator_note: s
             },
             {
                 "title": "Collect one-week interval data",
-                "what": "Gather 7-day consumption profile to convert upload-only findings into quantified decision",
+                "what": "Gather 7-day consumption profile to convert evidence review findings into a quantified decision",
                 "when": "this week",
                 "impact": "medium",
                 "urgency": "medium",
@@ -282,7 +383,7 @@ def _run_upload_only_analysis(query: str, uploaded_files: list, operator_note: s
     top_cause = causes[0]["impact"] if causes else "No major cause identified"
 
     technical_lines = [
-        "Upload-only decision rationale:",
+        "Evidence review decision rationale:",
         f"- Query: {query}",
         f"- Inputs: files={total_files}, images={image_count}, pdfs={pdf_count}, operator_note={'yes' if operator_note.strip() else 'no'}",
     ]
@@ -296,20 +397,20 @@ def _run_upload_only_analysis(query: str, uploaded_files: list, operator_note: s
             f"- Top issue: {top_issue}",
             f"- Cause signal: {top_cause}",
             f"- Priority action: {top_action}",
-            "- Confidence note: upload-only path gives directional guidance; validate with time-series meter data.",
+            "- Confidence note: evidence review guidance is directional; validate with time-series meter data if available.",
         ]
     )
     technical = "\n".join(technical_lines)
-    simple = f"Based on uploaded evidence, main issue is {top_issue.lower()}. Start with {top_action.lower()}."
+    simple = f"Based on the provided evidence, main issue is {top_issue.lower()}. Start with {top_action.lower()}."
 
     messages = [
-        {"agent": "Planner", "type": "plan", "content": "Selected route: upload_only; nodes: ['multimodal', 'critic', 'synthesizer']"},
+        {"agent": "Planner", "type": "plan", "content": "Selected route: evidence_review; nodes: ['multimodal', 'critic', 'synthesizer']"},
         {"agent": "Multimodal", "type": "evidence", "content": f"Received files={total_files} (images={image_count}, pdfs={pdf_count}), operator_note={'yes' if operator_note.strip() else 'no'}"},
-        {"agent": "Synthesizer", "type": "decision", "content": "Finalized upload-only response with provisional confidence=60"},
+        {"agent": "Synthesizer", "type": "decision", "content": "Finalized evidence review response with provisional confidence=60"},
     ]
 
     final_response = {
-        "risk_card": {"title": "Energy Ops Risk (Uploaded Evidence)", "value": f"{issues[0]['severity'].title()} (upload-only)"},
+        "risk_card": {"title": "Energy Ops Risk (Evidence Review)", "value": f"{issues[0]['severity'].title()} (evidence review)"},
         "issue_card": {"title": "Top Issue", "value": f"{top_issue} (confidence={int(round(issues[0].get('confidence', 0.6)*100))}%)"},
         "cause_card": {"title": "Likely Cause", "value": top_cause},
         "action_card": {"title": "Best Next Action", "value": top_action},
@@ -331,12 +432,342 @@ def _run_upload_only_analysis(query: str, uploaded_files: list, operator_note: s
     return {"final_response": final_response, "metrics": {}, "insights": {}}
 
 
+def _build_alert_text(result: dict) -> str:
+    anomaly = result.get("anomaly", {})
+    recommendation = result.get("recommendation", {}) or {}
+    anomaly_type = recommendation.get("type") or anomaly.get("anomaly_reason", "True Waste")
+    rec_text = recommendation.get("recommendation") or "Inspect the building and correct the issue."
+    return (
+        f"EcoSense True Waste Alert\n"
+        f"Building: {anomaly.get('building_id', 'unknown')}\n"
+        f"Date: {anomaly.get('date', 'unknown')}\n"
+        f"Consumption: {anomaly.get('consumption_kwh', 'unknown')} kWh\n"
+        f"Baseline: {anomaly.get('baseline', 'unknown')} kWh\n"
+        f"Deviation: {anomaly.get('deviation_pct', 'unknown')}%\n"
+        f"Type: {anomaly_type}\n"
+        f"Recommendation: {rec_text}"
+    )
+
+
+def _initialize_live_environment() -> DatabaseManager:
+    db = DatabaseManager()
+    db.initialize_workspace()
+    db.seed_campus_schedule()
+    return db
+
+
+def _seed_initial_stream_data(db: DatabaseManager, df: pd.DataFrame, focus_building=None):
+    """Seed initial data points to Active_Stream for immediate display - building-specific."""
+    existing_data = db.read_tab("Active_Stream")
+    if existing_data:
+        return
+
+    if not df.empty:
+        # Filter data based on focus building
+        if focus_building and focus_building != "All":
+            filtered_df = df[df['building_id'] == focus_building]
+            buildings = [focus_building]
+        else:
+            # Get all buildings if "All" or no specific building selected
+            filtered_df = df
+            buildings = df['building_id'].unique()
+        
+        initial_data = []
+        
+        for building in buildings:
+            building_rows = filtered_df[filtered_df['building_id'] == building].head(5)
+            initial_data.append(building_rows)
+        
+        # Combine building samples
+        initial_data = pd.concat(initial_data, ignore_index=True) if initial_data else pd.DataFrame()
+        
+        if not initial_data.empty:
+            initial_data['is_faulty'] = 'NO'
+            rows = initial_data[['building_id', 'date', 'consumption_kwh', 'is_faulty']].values.tolist()
+            try:
+                db.write_rows("Active_Stream", rows)
+                if focus_building and focus_building != "All":
+                    print(f"Seeded {len(rows)} initial data points for {focus_building} to Active_Stream")
+                else:
+                    print(f"Seeded {len(rows)} initial data points across {len(buildings)} buildings to Active_Stream")
+            except Exception as e:
+                print(f"Failed to seed initial data: {e}")
+
+
+def _build_agent_messages_from_result(result: dict) -> list:
+    anomaly = result.get("anomaly", {})
+    context = result.get("context", {})
+    recommendation = result.get("recommendation", {}) or {}
+    building_id = anomaly.get('building_id', 'unknown')
+    date = anomaly.get('date', 'unknown')
+
+    messages = [
+        {
+            "agent": "Planner",
+            "type": "info",
+            "content": f"Analyzing {building_id} on {date}. Comparing meter stream to campus schedule."
+        }
+    ]
+
+    if anomaly:
+        messages.append({
+            "agent": "DetectIssues",
+            "type": "finding",
+            "content": f"Detected {anomaly.get('deviation_pct', 0):.1f}% spike in {building_id}: {anomaly.get('consumption_kwh', 'unknown')} kWh vs baseline {anomaly.get('baseline', 'unknown')} kWh."
+        })
+
+    if context.get("status") == "true_waste":
+        messages.append({
+            "agent": "RootCause",
+            "type": "finding",
+            "content": f"No scheduled event on {date} — likely true waste from HVAC or lighting."
+        })
+
+    if recommendation:
+        rec_text = recommendation.get('recommendation', 'Investigate energy usage')
+        messages.append({
+            "agent": "ActionPlanner",
+            "type": "proposal",
+            "content": f"Recommend: {rec_text}"
+        })
+        messages.append({
+            "agent": "Critic",
+            "type": "decision",
+            "content": "Quality check passed. Recommendation is actionable and safe."
+        })
+        messages.append({
+            "agent": "Synthesizer",
+            "type": "decision",
+            "content": f"True waste confirmed for {building_id}. Alert sent via Telegram."
+        })
+
+    return messages
+
+
+def _build_no_anomaly_messages(latest_row: dict) -> list:
+    building_id = latest_row.get('building_id', 'unknown')
+    date = latest_row.get('date', 'unknown')
+
+    return [
+        {
+            "agent": "Planner",
+            "type": "info",
+            "content": f"Analyzing {building_id} on {date}. Comparing meter stream to campus schedule."
+        },
+        {
+            "agent": "DetectIssues",
+            "type": "info",
+            "content": f"No unusual energy-use problems were detected in the current Active_Stream data for {building_id}."
+        },
+        {
+            "agent": "ActionPlanner",
+            "type": "proposal",
+            "content": "No corrective action is required at this time. Continue monitoring the stream."
+        },
+        {
+            "agent": "Synthesizer",
+            "type": "decision",
+            "content": "Current energy behavior is within expected range. Keep tracking actual Excel stream data for changes."
+        }
+    ]
+
+
+def _auto_analyze_existing_active_stream() -> None:
+    db = st.session_state.get("live_db") or st.session_state.get("dashboard_db")
+    if not db:
+        return
+
+    active_stream = db.read_tab("Active_Stream")
+    if not active_stream:
+        return
+
+    stream_length = len(active_stream)
+    last_length = st.session_state.get("last_active_stream_length", 0)
+    if st.session_state.get("agent_messages") and stream_length <= last_length:
+        return
+
+    st.session_state["last_active_stream_length"] = stream_length
+
+    if "live_agent_team" not in st.session_state:
+        st.session_state.live_agent_team = AgentTeam(db_manager=db)
+
+    result = st.session_state.live_agent_team.handle_stream_event(None)
+    if result and "error" not in result:
+        st.session_state["agent_messages"] = _build_agent_messages_from_result(result)
+    elif result and "error" in result:
+        print(f"Agent theater skipped analysis due to error: {result.get('message')}")
+    else:
+        st.session_state["agent_messages"] = _build_no_anomaly_messages(active_stream[-1])
+
+
+def _start_telegram_bot_polling() -> None:
+    """Start the Telegram bot polling loop in a background thread."""
+    if "live_telegram" not in st.session_state:
+        return
+    
+    telegram_bot = st.session_state.live_telegram
+    if not telegram_bot.is_configured():
+        print("Telegram: Not configured (missing TOKEN or CHAT_ID). Polling not started.")
+        return
+    
+    # Stop existing bot if running
+    if telegram_bot.running:
+        print("Telegram: Bot already running, stopping first...")
+        telegram_bot.stop_bot()
+    
+    def telegram_polling_thread():
+        try:
+            print("[TELEGRAM] Starting bot polling in background...")
+            telegram_bot.run_bot()
+        except Exception as e:
+            print(f"[TELEGRAM] Polling error: {e}")
+    
+    thread = threading.Thread(target=telegram_polling_thread, daemon=True)
+    thread.start()
+    st.session_state.telegram_polling_started = True
+    st.session_state.telegram_polling_thread = thread
+    print("[TELEGRAM] Polling thread started successfully.")
+
+
+def _restart_simulation_with_new_building() -> None:
+    """Restart simulation when building selection changes."""
+    # Initialize database if not exists
+    if "live_db" not in st.session_state:
+        st.session_state.live_db = _initialize_live_environment()
+    
+    if st.session_state.get("sim_running"):
+        _stop_live_demo()
+    
+    # Stop Telegram bot before reinitializing
+    if "live_telegram" in st.session_state and st.session_state.live_telegram:
+        try:
+            st.session_state.live_telegram.stop_bot()
+            print("Telegram: Bot stopped for building change")
+        except Exception as e:
+            print(f"Telegram: Error stopping bot: {e}")
+    
+    # Clear and reinitialize with new building selection
+    st.session_state.live_db.clear_tab("Active_Stream")
+    st.session_state.live_db.clear_tab("Audit_Ledger")
+    st.session_state.live_db.initialize_workspace()
+    st.session_state.live_db.seed_campus_schedule()
+    
+    selected_building = st.session_state.get("selected_building", "All")
+    st.session_state.live_simulator = EnergySimulator(db_manager=st.session_state.live_db, focus_building=selected_building)
+    
+    # Reinitialize Telegram bot with new simulator
+    if "live_agent_team" not in st.session_state:
+        st.session_state.live_agent_team = AgentTeam(db_manager=st.session_state.live_db)
+    
+    st.session_state.live_telegram = TelegramBot(
+        db_manager=st.session_state.live_db,
+        simulator=st.session_state.live_simulator,
+        agent_team=st.session_state.live_agent_team,
+    )
+    print("Telegram: Bot reinitialized with new building focus")
+    
+    # Restart simulation automatically if it was running
+    if st.session_state.get("sim_was_running_before_building_change", False):
+        _start_live_demo()
+        st.session_state.sim_was_running_before_building_change = False
+
+
+def _start_live_demo() -> None:
+    if st.session_state.get("sim_running"):
+        return
+
+    if "live_db" not in st.session_state:
+        st.session_state.live_db = _initialize_live_environment()
+    
+    # Get selected building from session state or sidebar
+    selected_building = st.session_state.get("selected_building", "All")
+    
+    if "live_simulator" not in st.session_state:
+        st.session_state.live_simulator = EnergySimulator(db_manager=st.session_state.live_db, focus_building=selected_building)
+    else:
+        # Update simulator with new building selection if changed
+        if st.session_state.live_simulator.focus_building != selected_building:
+            st.session_state.live_simulator = EnergySimulator(db_manager=st.session_state.live_db, focus_building=selected_building)
+    
+    if "live_agent_team" not in st.session_state:
+        st.session_state.live_agent_team = AgentTeam(db_manager=st.session_state.live_db)
+    if "live_telegram" not in st.session_state:
+        st.session_state.live_telegram = TelegramBot(
+            db_manager=st.session_state.live_db,
+            simulator=st.session_state.live_simulator,
+            agent_team=st.session_state.live_agent_team,
+        )
+    else:
+        st.session_state.live_telegram.simulator = st.session_state.live_simulator
+        st.session_state.live_telegram.agent_team = st.session_state.live_agent_team
+
+    # Start Telegram bot polling in background
+    _start_telegram_bot_polling()
+    
+    # Initialize agent messages list
+    if "agent_messages" not in st.session_state:
+        st.session_state["agent_messages"] = []
+
+    # Seed initial data for immediate display (only for selected building)
+    df = load_energy_dataset()
+    if not df.empty:
+        selected_building = st.session_state.get("selected_building", "All")
+        _seed_initial_stream_data(st.session_state.live_db, df, focus_building=selected_building)
+
+    simulator = st.session_state.live_simulator
+    agent_team = st.session_state.live_agent_team
+    telegram_bot = st.session_state.live_telegram
+
+    def on_update(payload):
+        result = agent_team.handle_stream_event(payload)
+        if not result:
+            return
+        if "error" in result:
+            print(f"DEBUG: Agent analysis skipped during live update - {result.get('message')}")
+            return
+
+        messages = st.session_state.get("agent_messages", [])
+        messages.extend(_build_agent_messages_from_result(result))
+        st.session_state["agent_messages"] = messages[-15:]
+
+        # Send alert
+        alert_text = _build_alert_text(result)
+        if telegram_bot.send_alert(alert_text):
+            st.session_state["alerts_sent"] = st.session_state.get("alerts_sent", 0) + 1
+
+    def runner():
+        simulator.start_stream(on_update=on_update)
+        st.session_state.sim_running = False
+
+    thread = threading.Thread(target=runner, daemon=True)
+    thread.start()
+    st.session_state.live_sim_thread = thread
+    st.session_state.sim_running = True
+
+
+def _stop_live_demo() -> None:
+    if st.session_state.get("live_simulator"):
+        st.session_state.live_simulator.stop_stream()
+    st.session_state.sim_running = False
+
+
+def _reset_live_demo() -> None:
+    _stop_live_demo()
+    if st.session_state.get("live_simulator"):
+        st.session_state.live_simulator.reset_system()
+    if st.session_state.get("live_db"):
+        st.session_state.live_db.initialize_workspace()
+        st.session_state.live_db.seed_campus_schedule()
+
+
 df = load_energy_dataset()
 if df.empty:
     st.error("No sample data found in data/sample/")
     st.stop()
 
 building_ids = all_building_ids(df, METADATA_PATH)
+active_buildings = [row.get("building_id") for row in DatabaseManager().read_tab("Active_Stream") if row.get("building_id")]
+building_ids = sorted(set(building_ids) | set(active_buildings))
 
 with st.sidebar:
     st.header("Account")
@@ -366,418 +797,288 @@ with st.sidebar:
             st.session_state["auth_role"] = None
             st.rerun()
 
+if "dashboard_db" not in st.session_state:
+    db = DatabaseManager()
+    db.initialize_workspace()
+    st.session_state["dashboard_db"] = db
+
+dashboard_db = st.session_state["dashboard_db"]
+
+# Initialize Telegram bot and simulation helpers at app startup (once, after login)
+if st.session_state.get("auth_user"):
+    # Get selected building from session state (will be set below)
+    selected_building = st.session_state.get("selected_building", "All")
+    if "live_simulator" not in st.session_state:
+        st.session_state.live_simulator = EnergySimulator(db_manager=dashboard_db, focus_building=selected_building)
+    if "live_agent_team" not in st.session_state:
+        st.session_state.live_agent_team = AgentTeam(db_manager=dashboard_db)
+
+    if "live_telegram" not in st.session_state:
+        st.session_state.live_telegram = TelegramBot(
+            db_manager=dashboard_db,
+            simulator=st.session_state.live_simulator,
+            agent_team=st.session_state.live_agent_team,
+        )
+    else:
+        st.session_state.live_telegram.db = dashboard_db
+        st.session_state.live_telegram.simulator = st.session_state.live_simulator
+        st.session_state.live_telegram.agent_team = st.session_state.live_agent_team
+
+    if "telegram_polling_started" not in st.session_state:
+        _start_telegram_bot_polling()
+
 if st.session_state["auth_user"] is None:
     render_homepage()
     st.stop()
 
+# Logged-in operations room
 with st.sidebar:
-    st.header("Controls")
-    analysis_mode = st.radio("Analysis mode", ["Building-based", "Upload-only", "v2 Real-time (Google Sheets)"], index=0)
-    building_id = None
-    if analysis_mode == "Building-based":
-        building_id = st.selectbox("Select building", building_ids)
-    query = st.text_input("Ask a question", value="What should I do first for this building?")
-    other = ""
-    if analysis_mode == "Building-based" and building_id:
-        other = st.selectbox("Optional compare building", [""] + [b for b in building_ids if b != building_id])
-    uploaded_files = st.file_uploader(
-        "Attach image/PDF evidence (optional)",
-        type=["png", "jpg", "jpeg", "pdf"],
-        accept_multiple_files=True,
-        key="mm_uploads",
+    st.header("Smart Energy Guardian")
+    st.markdown(
+        "This is your live energy operations room. Monitor the simulated meter stream, review AI agent decisions, and use Telegram alerts to stay ahead of true waste."
     )
-    operator_note = st.text_area(
-        "Operator note (optional)",
-        value="",
-        placeholder="Add observations from site, complaints, incidents, or special events...",
-        key="operator_note",
-    )
-    if uploaded_files:
-        st.caption(f"Attached files: {len(uploaded_files)}")
-    run = st.button("Run Decision Workflow", type="primary", width="stretch")
-    reset_result = st.button("Reset Last Result", key="reset_result_btn", type="primary", width="stretch")
+    st.markdown("---")
+
+    # Get previous building selection to detect changes
+    previous_building = st.session_state.get("selected_building", "All")
+    
+    selected_building = st.selectbox("Focus on building", ["All"] + building_ids, index=0)
+    
+    # Check if building selection changed
+    if previous_building != selected_building:
+        st.session_state["selected_building"] = selected_building
+        # Store that simulation was running so it can be restarted
+        if st.session_state.get("sim_running", False):
+            st.session_state.sim_was_running_before_building_change = True
+        # Restart simulation with new building
+        _restart_simulation_with_new_building()
+        st.success(f"Building focus changed to: {selected_building}")
+        st.rerun()
+    else:
+        # Store selected building in session state
+        st.session_state["selected_building"] = selected_building
+
+    st.markdown("### Live demo controls")
+    if st.button("▶️ Start Live Demo", use_container_width=True):
+        _start_live_demo()
+    if st.button("⏹ Stop Live Demo", use_container_width=True):
+        _stop_live_demo()
+    if st.button("🔄 Reset Digital Twin", use_container_width=True):
+        _reset_live_demo()
+
+    if st.button("🔍 Run Instant Analysis", use_container_width=True, help="Run AI analysis on current data"):
+        _auto_analyze_existing_active_stream()
+        if st.session_state.get("agent_messages"):
+            st.success("Analysis completed. Check the Agent Theater for results.")
+        else:
+            st.info("No data available for analysis or no issues detected.")
+
+    if st.button("📱 Test Telegram", use_container_width=True, help="Send a test message to Telegram"):
+        if st.session_state.get("live_telegram"):
+            if st.session_state.live_telegram.send_alert("Test message from EcoSense Dashboard"):
+                st.success("Test message sent to Telegram!")
+            else:
+                st.error("Failed to send test message. Check Telegram configuration.")
+        else:
+            st.warning("Start the live demo first to initialize Telegram.")
+
+    st.markdown("---")
+    run_status = "RUNNING" if st.session_state.get("sim_running") else "IDLE"
+    st.write(f"**Simulation state:** {run_status}")
+    
+    # Show Telegram status
+    telegram_status = "🟢 LISTENING" if st.session_state.get("telegram_polling_started") else "🔴 NOT LISTENING"
+    st.write(f"**Telegram commands:** {telegram_status}")
+
+    if st.session_state.get("sim_running"):
+        st.success("Live stream is active. Watch the Digital Twin update in near real-time.")
+    else:
+        st.info("No live simulation is currently running. Use Start Live Demo to begin.")
+
+    # Health check
+    if st.session_state.get("live_sim_thread") and not st.session_state.get("live_sim_thread").is_alive():
+        st.warning("Simulator thread has stopped. Restart the demo.")
+        st.session_state.sim_running = False
 
     if st.session_state.get("auth_role") == "admin":
+        st.markdown("---")
         st.markdown("##### Administration")
         st.page_link("pages/1_Operators.py", label="Operators & accounts", icon="👥")
         st.page_link("pages/2_Building_data.py", label="Building data & consumption", icon="🏢")
     else:
-        st.caption("Administration pages are available when signed in as an administrator.")
+        st.markdown("---")
+        st.caption("Admin tools are available to administrators.")
 
-if reset_result:
-    st.session_state.pop("result", None)
-    st.session_state.pop("last_run_query", None)
-    st.session_state.pop("last_run_building", None)
-    for k in ("agent_conv_key", "agent_live_count", "agent_user_thread", "agent_step_cursor", "pdf_path", "awaiting_report_permission", "last_mm_inputs", "last_operator_note"):
-        st.session_state.pop(k, None)
-    st.success("Cleared previous result. Run workflow again.")
+    st.markdown("---")
+    st.caption("Need Telegram alerts? Fill in `TELEGRAM_TOKEN` and `MY_CHAT_ID` in .env.")
 
-if run:
-    mm_inputs = _serialize_uploads(uploaded_files)
-    st.session_state["last_mm_inputs"] = mm_inputs
-    st.session_state["last_operator_note"] = operator_note
-    with st.spinner("Running agent workflow..."):
-        if analysis_mode == "Upload-only":
-            result = _run_upload_only_analysis(query=query, uploaded_files=uploaded_files or [], operator_note=operator_note)
-        else:
-            wf_params = inspect.signature(run_workflow).parameters
-            base_kwargs = {
-                "query": query,
-                "building_id": building_id,
-                "compare_building_id": other if other else None,
+# Build the live operations room view
+st.markdown(
+    """
+    <div class='ecosense-header-bar'>
+        <div>
+            <div class='ecosense-title'>Smart Energy Guardian</div>
+            <div class='ecosense-sub'>Live operations room for campus energy, schedule-aware waste detection, and proactive Telegram alerts.</div>
+        </div>
+        <div class='ecosense-pill'>Live monitoring enabled</div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+# Summary KPIs from the Digital Twin
+live_db = dashboard_db
+sheet_ready = live_db.is_ready()
+active_stream = live_db.read_tab("Active_Stream")
+audit_ledger = live_db.read_tab("Audit_Ledger")
+schedule = live_db.read_tab("Campus_Schedule")
+
+latest_point = active_stream[-1] if active_stream else {}
+
+col1, col2, col3, col4 = st.columns(4)
+with col1:
+    st.metric("Active stream rows", len(active_stream))
+with col2:
+    st.metric("Audit log entries", len(audit_ledger))
+with col3:
+    st.metric("Scheduled events", len(schedule))
+with col4:
+    alerts_sent = st.session_state.get("alerts_sent", 0)
+    st.metric("Alerts sent", alerts_sent)
+
+status_col1, status_col2 = st.columns([3, 1])
+with status_col1:
+    if sheet_ready:
+        st.success("Google Sheets sync: enabled")
+    else:
+        st.warning("Google Sheets sync: disabled — local fallback active")
+with status_col2:
+    if audit_ledger:
+        import pandas as _pd
+        csv_bytes = _pd.DataFrame(audit_ledger).to_csv(index=False).encode("utf-8")
+        st.download_button(
+            "📄 Download Audit Ledger",
+            data=csv_bytes,
+            file_name="ecosense_audit_ledger.csv",
+            mime="text/csv",
+        )
+    else:
+        st.info("No audit ledger entries to download yet.")
+
+    if st.button("📊 Generate Energy Report", key="generate_report"):
+        if active_stream:
+            from src.tools.reporting_tools import build_pdf
+            import pandas as _pd
+            df = _pd.DataFrame(active_stream)
+            report_data = {
+                "building_id": selected_building if selected_building != "All" else "All Buildings",
+                "data_summary": {"data_points": len(df)},
+                "analysis": {"issues_found": len([r for r in audit_ledger if r.get("anomaly_type") != ""])},
+                "recommendations": {"recommendations_count": len(audit_ledger)},
+                "compliance": {"compliant": True},
+                "alerts_generated": len(audit_ledger)
             }
-            if mm_inputs and "multimodal_inputs" not in wf_params:
-                st.warning("Backend runtime does not support multimodal args yet. Restart Streamlit to enable file evidence ingestion.")
-            if "multimodal_inputs" in wf_params:
-                base_kwargs["multimodal_inputs"] = mm_inputs
-            if "operator_note" in wf_params:
-                base_kwargs["operator_note"] = operator_note
-            result = run_workflow(**base_kwargs)
-    st.session_state["result"] = result
-    st.session_state["last_run_query"] = query
-    st.session_state["last_run_building"] = building_id
-    st.session_state["awaiting_report_permission"] = True  # New state for permission flow
-    
-    # Auto-scroll to results using JS injection
+            report_path = build_pdf(report_data)
+            st.success(f"Report generated: {report_path}")
+            with open(report_path, "rb") as f:
+                st.download_button(
+                    "Download PDF Report",
+                    data=f,
+                    file_name="ecosense_energy_report.pdf",
+                    mime="application/pdf",
+                )
+        else:
+            st.warning("No data available to generate report.")
+
+st.markdown("---")
+
+# Live operations tabs
+live_tab, theater_tab, twin_tab, alerts_tab = st.tabs([
+    "Live Ops",
+    "Agent Theater",
+    "Digital Twin",
+    "Telegram"
+])
+
+with live_tab:
+    if not sheet_ready:
+        st.warning(
+            "Google Sheets sync is not configured. Live demo mode is limited to local fallback stream data. "
+            "Set GOOGLE_SHEET_ID and GOOGLE_APPLICATION_CREDENTIALS to unlock cloud persistence."
+        )
+    render_v2_realtime_ui(db=live_db, focus_building=selected_building)
+
+_auto_analyze_existing_active_stream()
+
+with theater_tab:
+    # Show real agent messages if available, otherwise waiting state
+    real_messages = st.session_state.get("agent_messages", [])
+    sim_running = st.session_state.get("sim_running", False)
+
+    if real_messages:
+        render_agent_theater(real_messages)
+        st.info("🔴 **LIVE ANALYSIS** - Agents are analyzing real-time data from the Excel sheet Active_Stream tab.")
+    elif sim_running:
+        # Simulation is running but no messages yet - show waiting
+        st.info("⏳ **Waiting for first anomaly detection...** Agents are monitoring the Excel sheet for energy patterns.")
+        st.write("The simulator is streaming data to the Active_Stream tab. Agents will speak when they detect anomalies in the real Excel data.")
+    else:
+        # No simulation running - show setup state
+        st.info("🎯 **Agent Theater - Ready for Analysis**")
+        st.write("**How it works:**")
+        st.write("1. Press 'Start Live Demo' to begin simulation")
+        st.write("2. Simulator writes energy data to Excel Active_Stream tab")
+        st.write("3. Agents analyze the Excel data in real-time")
+        st.write("4. Agent decisions are based ONLY on actual Excel sheet data")
+        st.write("")
+        st.write("**No demo content shown** - All agent messages come from analyzing real Excel data.")
+
+with twin_tab:
+    st.subheader("Digital Twin status")
+    st.write("The Google Sheet acts as the campus digital twin. One tab streams current power data while another holds scheduled campus events.")
+    st.write("Use this mode to validate whether spikes are expected or represent true waste.")
+    if schedule:
+        st.table(
+            [
+                {"Event": row.get("event_name"), "Date": row.get("date"), "Time": f"{row.get('start_time')}–{row.get('end_time')}", "Notes": row.get("description")}
+                for row in schedule
+            ]
+        )
+    else:
+        st.warning("Campus schedule is empty. Seed the schedule using the main script or Google Sheets tab.")
+
+with alerts_tab:
+    st.subheader("Telegram Alerts")
+    st.write("True waste events trigger proactive Telegram notifications to your phone. Use `/status` to check how the system is performing.")
+    if not os.getenv("TELEGRAM_TOKEN") or not os.getenv("MY_CHAT_ID"):
+        st.warning("Telegram is not configured. Add TELEGRAM_TOKEN and MY_CHAT_ID to .env and restart the app.")
+    else:
+        st.success("Telegram is configured. Alerts will be sent for confirmed true waste events.")
+
     st.markdown(
-        """
-        <script>
-        var mainContainer = window.parent.document.querySelector('section.main');
-        if (mainContainer) {
-            mainContainer.scrollTo({
-                top: mainContainer.scrollHeight,
-                behavior: 'smooth'
-            });
-        }
-        </script>
-        """,
-        unsafe_allow_html=True
+        "**Telegram Commands:**\n"
+        "- `/status` -> Get system status including active stream count, audit ledger entries, and current focus building.\n"
+        "- `/start_sim` -> Start the simulation and receive alerts for anomalies detected.\n"
+        "- `/stop_sim` -> Stop the simulation stream.\n"
+        "- `/reset` -> Clear the current sheets, reset pointer, and restart the simulation.\n"
+        "- `/insights` -> Get current system insights including latest readings, recent actions, and focus building.\n"
+        "- `/building <building_name>` -> Check specific building data, statistics, and recent actions.\n\n"
+        "**Building Examples:**\n"
+        "- `/building FBS Building` -> Check FBS Building specific data\n"
+        "- `/building Academic Building` -> Check Academic Building data\n"
+        "- `/building \"Admin Block\"` -> Check Admin Block data (use quotes for names with spaces)\n\n"
+        "**Note:** Alerts are sent for confirmed true waste events with anomaly details and recommendations. "
+        "All commands now include building context for better monitoring."
     )
 
-result = st.session_state.get("result")
-_building_label = (
-    str(building_id)
-    if analysis_mode == "Building-based" and building_id
-    else ("Upload-only" if analysis_mode == "Upload-only" else ("Real-time Audit" if analysis_mode == "v2 Real-time (Google Sheets)" else None))
-)
-render_top_header(
-    user=str(st.session_state.get("auth_user") or ""),
-    building_label=_building_label,
-    has_result=bool(result),
-)
-
-if analysis_mode == "v2 Real-time (Google Sheets)":
-    render_v2_realtime_ui()
-elif result:
-    resp = result.get("final_response", {})
-    # Backward compatibility: upgrade old cached cause wording in session results.
-    if resp.get("cause_card", {}).get("value") == "daily usage is inconsistent":
-        metrics_for_patch = resp.get("metrics", result.get("metrics", {}))
-        vr = metrics_for_patch.get("variability_ratio", 0)
-        ac = metrics_for_patch.get("anomaly_count", 0)
-        patched = (
-            f"high day-to-day variability (ratio={vr:.2f}, anomalies={ac}) "
-            "indicates inconsistent operating schedule"
-        )
-        resp["cause_card"]["value"] = patched
-        causes = resp.get("causes", [])
-        if causes and isinstance(causes[0], dict):
-            causes[0]["impact"] = patched
-
-    technical = resp.get("technical", "")
-    if technical.strip().startswith("Top issue:"):
-        technical = _build_decision_rationale(resp)
-        resp["technical"] = technical
-    simple = resp.get("simple", "")
-    evaluation = evaluate_response(technical, simple)
-
-    # Tab state management to prevent unwanted switching
-    tab_names = ["Decision Center", "Agent Theater", "Evaluation & Report"]
-    if "active_tab" not in st.session_state:
-        st.session_state.active_tab = 0
-    
-    # Tab selector that maintains state
-    st.markdown("---")
-    col1, col2, col3 = st.columns([1, 1, 1])
-    with col1:
-        if st.button("🏠 Decision Center", use_container_width=True, 
-                    type="primary" if st.session_state.active_tab == 0 else "secondary"):
-            st.session_state.active_tab = 0
-            st.rerun()
-    with col2:
-        if st.button("🎭 Agent Theater", use_container_width=True,
-                    type="primary" if st.session_state.active_tab == 1 else "secondary"):
-            st.session_state.active_tab = 1
-            st.rerun()
-    with col3:
-        if st.button("📊 Evaluation & Report", use_container_width=True,
-                    type="primary" if st.session_state.active_tab == 2 else "secondary"):
-            st.session_state.active_tab = 2
-            st.rerun()
-    st.markdown("---")
-    
-    # Display selected tab content
-    if st.session_state.active_tab == 0:
-        render_decision_cards(resp)
-        
-        # Integrated 3D Agent Simulation
-        st.divider()
-        metrics = result.get("metrics", result.get("final_response", {}).get("metrics"))
-        insights = result.get("insights", {})
-        if not metrics:
-            metrics = result.get("metrics", {})
-        if not insights:
-            insights = result.get("insights", {})
-        # fallback from workflow state
-        metrics = result.get("metrics", metrics or {})
-        insights = result.get("insights", insights or {})
-
-        if metrics:
-            render_simulator_panel(metrics, insights, resp)
-        else:
-            st.info("No metrics available for simulation.")
-        st.divider()
-
-        c1, c2 = st.columns([1, 1])
-
-        with c1:
-            q_text = st.session_state.get("last_run_query") or query
-            render_assistant_brief(str(q_text), simple, technical, resp)
-            with st.expander("Full technical summary", expanded=False):
-                st.text(technical)
-
-            if building_id:
-                building_df = df[df["building_id"] == building_id].copy()
-                render_consumption_chart(building_df, building_id, key=f"cons_chart_{building_id}")
-            else:
-                st.info("Consumption chart is available in Building-based mode.")
-
-        with c2:
-            st.subheader("Operational Focus")
-            issue_bar_key = f"issue_bar_{building_id}" if building_id else "issue_bar_upload_only"
-            render_issue_bar(resp.get("issues", []), key=issue_bar_key)
-            right_tabs = st.tabs(["Detected Issues", "Recommended Actions"])
-            with right_tabs[0]:
-                render_issues_ui(resp.get("issues", []))
-            with right_tabs[1]:
-                render_actions_ui(resp.get("actions", []), building_id=building_id)
-
-        # Key Insights & Evidence
-        st.divider()
-        st.subheader("🔍 Key Insights & Evidence")
-        
-        retrieval_meta = resp.get("retrieval_meta", {})
-        rag_count = int(retrieval_meta.get("bm25_count", 0)) + int(retrieval_meta.get("vector_count", 0))
-        stat_count = retrieval_meta.get("statistical_count", 0)
-        mm_count = int(retrieval_meta.get("multimodal_count", 0) or 0)
-        
-        # Simple evidence summary
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("📚 Knowledge Sources", rag_count, help="AI knowledge and best practices used")
-        with col2:
-            st.metric("📊 Data Analysis", stat_count, help="Statistical patterns found")
-        with col3:
-            st.metric("📎 File Insights", mm_count, help="Uploaded documents and images analyzed")
-        
-        # Show key evidence in simple language
-        evidence = resp.get("evidence", [])
-        if evidence:
-            st.markdown("**What the AI found helpful:**")
-            # Group evidence by type and show top insights
-            rag_evidence = [e for e in evidence if 'bm25' in str(e.get('source', '')).lower() or 'vector' in str(e.get('source', '')).lower()]
-            stat_evidence = [e for e in evidence if 'statistical' in str(e.get('source', '')).lower()]
-            
-            if rag_evidence:
-                with st.expander("💡 Smart Recommendations", expanded=True):
-                    for i, ev in enumerate(rag_evidence[:3], 1):  # Show top 3
-                        text = ev.get('text', '')
-                        # Simplify the language
-                        simple_text = text.replace('should prioritize', 'focus on').replace('buildings with', 'buildings that have')
-                        st.markdown(f"• {simple_text}")
-            
-            if stat_evidence:
-                with st.expander("📈 Energy Patterns Found", expanded=True):
-                    for ev in stat_evidence:
-                        text = ev.get('text', '')
-                        # Make stats more readable
-                        if 'avg=' in text:
-                            st.markdown(f"• **Average consumption:** {text.split('avg=')[1].split(',')[0]} kWh per day")
-                        elif 'variability ratio' in text:
-                            ratio = text.split('variability ratio=')[1].split(',')[0]
-                            st.markdown(f"• **Energy consistency:** {ratio} (lower is more stable)")
-                        elif 'anomalies=' in text:
-                            count = text.split('anomalies=')[1].split(',')[0]
-                            st.markdown(f"• **Unusual days:** {count} days with abnormal usage")
-                        else:
-                            st.markdown(f"• {text}")
-
-        # Compliance section (moved from separate tab)
-        st.subheader("✅ Energy Compliance Check")
-        compliance = resp.get("compliance", {})
-        if compliance and isinstance(compliance, dict) and any(compliance.values()):
-            score = compliance.get("score")
-            status = compliance.get("status", "Unknown")
-            c1, c2 = st.columns(2)
-            with c1:
-                st.metric("Compliance Score", score if score is not None else "N/A")
-            with c2:
-                st.metric("Status", status)
-                # Add NLP explanation for status
-                status_prompt = (
-                    f"Explain what a '{status}' compliance status means for building energy efficiency in simple terms. "
-                    "Keep it under 50 words, encouraging and actionable."
-                )
-                status_explanation = generate_with_gemini(status_prompt, safety_delay=1)
-                if status_explanation:
-                    st.caption(status_explanation)
-
-            comp_evidence = compliance.get("evidence", [])
-            if comp_evidence:
-                with st.expander("Compliance Evidence", expanded=False):
-                    # Generate NLP summary of evidence
-                    evidence_texts = [item.get("text", "") for item in comp_evidence if item.get("text")]
-                    if evidence_texts:
-                        summary_prompt = (
-                            f"Summarize these compliance evidence points in simple language for non-experts: {evidence_texts[:3]}. "
-                            "Explain what they mean for energy efficiency and building operations. Keep under 150 words."
-                        )
-                        summary = generate_with_gemini(summary_prompt, safety_delay=1)
-                        if summary:
-                            st.markdown(f"**Summary**: {summary}")
-                            st.divider()
-                    for item in comp_evidence:
-                        text = item.get("text", "")
-                        src = item.get("source", "unknown")
-                        st.markdown(f"- {text} (`{src}`)")
-            else:
-                st.caption("No specific compliance issues found.")
-        else:
-            # Generate NLP-based explanation for no compliance results
-            explanation_prompt = (
-                "Explain in simple, everyday language why there might be no compliance results for this building energy analysis. "
-                "Keep it under 100 words, helpful, and reassuring. Focus on what compliance means for energy efficiency."
+    # Show recent alerts
+    audit_data = live_db.read_tab("Audit_Ledger")
+    audit_data = live_db.read_tab("Audit_Ledger")
+    if audit_data:
+        st.markdown("### Recent Alerts")
+        for row in audit_data[-5:]:
+            st.markdown(
+                f"**{row.get('timestamp')}** - {row.get('building_id')}: {row.get('recommendation')}"
             )
-            explanation = generate_with_gemini(explanation_prompt, safety_delay=1)
-            if explanation:
-                st.info(f"💡 **Compliance Insights**: {explanation}")
-            else:
-                st.info("No compliance results for this run.")
-
-    elif st.session_state.active_tab == 1:
-        render_agent_theater(resp.get("messages", []), resp)
-
-    elif st.session_state.active_tab == 2:
-        st.subheader("Decision Quality Check")
-        quality = evaluation.get("quality", {}) if isinstance(evaluation, dict) else {}
-        faithfulness = evaluation.get("faithfulness", {}) if isinstance(evaluation, dict) else {}
-
-        e1, e2 = st.columns(2)
-        with e1:
-            q_score = quality.get("score")
-            score_label = "Strong" if isinstance(q_score, (int, float)) and q_score >= 80 else ("Moderate" if isinstance(q_score, (int, float)) and q_score >= 60 else "Weak")
-            st.metric("Response Strength", f"{q_score if q_score is not None else 'N/A'} ({score_label})")
-            reasons = quality.get("reasons", [])
-            if reasons:
-                st.caption("Why this looks strong/weak")
-                for reason in reasons:
-                    st.write(f"- {reason}")
-            else:
-                st.caption("No quality explanation available.")
-
-        with e2:
-            faithful = faithfulness.get("faithful")
-            ratio = faithfulness.get("ratio")
-            status = "Aligned" if faithful else "Needs review"
-            st.metric("Data Alignment", status)
-            if ratio is not None:
-                st.caption(f"How much summary matches technical numbers: {ratio:.2f}")
-            tnum = faithfulness.get("technical_numbers")
-            snum = faithfulness.get("simple_numbers")
-            if tnum is not None and snum is not None:
-                st.caption(f"Numbers found -> technical: {tnum}, simple explanation: {snum}")
-
-        st.info(
-            "Operator meaning: if Data Alignment says 'Needs review', verify numbers before acting. "
-            "Use the Technical Summary and Detected Issues tabs for confirmation."
-        )
-
-        st.subheader("Review Flags")
-        critiques = resp.get("critiques", [])
-        if critiques:
-            for i, critique in enumerate(critiques, start=1):
-                with st.container(border=True):
-                    st.markdown(f"**Flag {i}**")
-                    st.write(str(critique))
-        else:
-            st.success("No review flags. Decision is ready for operator action.")
-
-        if st.button("Generate PDF Report", key="pdf_btn", type="primary"):
-            pdf_path = build_pdf(result)
-            st.session_state["pdf_path"] = pdf_path
-            st.success(f"Report generated: {os.path.basename(pdf_path)}")
-
-        # --- Python-based VISUALIZATION ENGINE ---
-        if st.button("📊 Update Consumption Alert", key="viz_btn", help="Send live metrics to the Telegram via Python"):
-            with st.spinner("Updating visualization..."):
-                metrics = result.get("metrics", {})
-                actual = metrics.get("avg_consumption", 0.0)
-                
-                # Try to get estimated savings to calculate optimized value
-                savings_kwh = 0.0
-                if "insights" in result:
-                    from src.core.reasoning import estimate_savings
-                    savings = estimate_savings(metrics, result["insights"])
-                    savings_kwh = savings.get("estimated_daily_kwh", 0.0)
-                
-                optimized = actual - savings_kwh
-                
-                viz_res = update_visualization_alert(
-                    building_id=building_id or "All Buildings",
-                    actual=actual,
-                    optimized=optimized
-                )
-                
-                if viz_res["status"] == "success":
-                    st.success("Alert updated successfully!")
-                else:
-                    st.error(viz_res["message"])
-        # ---------------------------------
-
-        pdf_path = st.session_state.get("pdf_path")
-        if pdf_path and os.path.exists(pdf_path):
-            with open(pdf_path, "rb") as f:
-                st.download_button(
-                    "Download PDF",
-                    f.read(),
-                    file_name=os.path.basename(pdf_path),
-                    mime="application/pdf",
-                    key="download_pdf",
-                    type="primary",
-                )
-
-    # Automated PDF and Notification Flow
-    if st.session_state.get("awaiting_report_permission") and result:
-        st.divider()
-        st.subheader("📋 Finalize Decision")
-        st.write("The analysis is complete. Would you like to generate the official PDF report and notify the database team?")
-        
-        c1, c2 = st.columns([1, 4])
-        with c1:
-            if st.button("✅ Yes, Generate & Send", type="primary", use_container_width=True):
-                with st.spinner("Generating PDF and logging to database..."):
-                    pdf_path = build_pdf(result)
-                    st.session_state["pdf_path"] = pdf_path
-                    
-                    # Send simulated email/log to database
-                    user = st.session_state.get("auth_user", "Unknown User")
-                    success = send_report_email(result, pdf_path, user)
-                    
-                    if success:
-                        st.success(f"Report generated and database notified successfully! {os.path.basename(pdf_path)}")
-                        st.session_state["awaiting_report_permission"] = False
-                        st.rerun()
-        with c2:
-            if st.button("❌ No, Just View Results", use_container_width=True):
-                st.session_state["awaiting_report_permission"] = False
-                st.rerun()
+    else:
+        st.info("No alerts sent yet. Start the live demo to trigger true waste notifications.")

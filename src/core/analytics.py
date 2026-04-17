@@ -50,9 +50,27 @@ def compute_building_metrics(bdf: pd.DataFrame) -> dict:
         anomaly_count = 0
 
     first_date = last_date = peak_day = ""
+    data_coverage = {
+        "days_covered": 0,
+        "span_days": 0,
+        "coverage_ratio": 0.0,
+        "partial_data": False,
+    }
     if "date" in bdf.columns:
-        first_date = str(bdf["date"].min().date())
-        last_date = str(bdf["date"].max().date())
+        unique_dates = bdf["date"].dt.date.dropna().unique()
+        day_count = int(len(unique_dates))
+        start_date = bdf["date"].min()
+        end_date = bdf["date"].max()
+        first_date = str(start_date.date())
+        last_date = str(end_date.date())
+        data_span_days = (end_date.date() - start_date.date()).days + 1
+        coverage_ratio = round(day_count / data_span_days, 2) if data_span_days > 0 else 0.0
+        data_coverage = {
+            "days_covered": day_count,
+            "span_days": data_span_days,
+            "coverage_ratio": coverage_ratio,
+            "partial_data": day_count < max(7, data_span_days),
+        }
         peak_idx = values.idxmax()
         peak_day = str(bdf.loc[peak_idx, "date"].date()) if peak_idx in bdf.index else ""
 
@@ -69,6 +87,7 @@ def compute_building_metrics(bdf: pd.DataFrame) -> dict:
         "total_records": len(bdf),
         "first_date": first_date,
         "last_date": last_date,
+        "data_coverage": data_coverage,
         "avg_consumption": avg_val,
         "min_consumption": min_val,
         "max_consumption": max_val,

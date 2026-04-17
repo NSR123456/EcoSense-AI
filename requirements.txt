@@ -21,3 +21,17 @@ google-auth-httplib2
 google-auth-oauthlib
 python-telegram-bot
 python-dotenv
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.0
+alembic>=1.12.0
+fastapi>=0.104.0
+uvicorn>=0.24.0
+pydantic>=2.5.0
+aiofiles>=23.2.1
+aiosqlite>=0.19.0
+python-multipart>=0.0.6
+prophet>=1.1.5
+tensorflow>=2.15.0
+opencv-python>=4.8.0
+pillow>=10.0.0
+schedule>=1.2.0

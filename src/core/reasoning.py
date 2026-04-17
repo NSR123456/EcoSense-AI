@@ -51,15 +51,24 @@ def compute_recent_pattern(bdf: pd.DataFrame) -> dict:
     previous_avg = float(prev.mean()) if len(prev) else 0.0
     change_pct = ((recent_avg - previous_avg) / previous_avg * 100) if previous_avg > 0 else 0.0
 
-    if change_pct >= 10:
-        urgency = "high"
-        time_window = "today"
-    elif change_pct >= 3:
-        urgency = "medium"
-        time_window = "this week"
+    if len(df) < 7 or ("date" in df.columns and df["date"].dt.date.nunique() < 7):
+        if change_pct >= 10:
+            urgency = "medium"
+        elif change_pct >= 3:
+            urgency = "medium"
+        else:
+            urgency = "low"
+        time_window = "as data allows"
     else:
-        urgency = "low"
-        time_window = "this month"
+        if change_pct >= 10:
+            urgency = "high"
+            time_window = "today"
+        elif change_pct >= 3:
+            urgency = "medium"
+            time_window = "this week"
+        else:
+            urgency = "low"
+            time_window = "this month"
 
     return {
         "recent_avg": round(recent_avg, 2),
@@ -116,21 +125,22 @@ def derive_action_plan(metrics: dict, insights: dict, recent_pattern: dict) -> l
         })
 
     if insights.get("peak_spike"):
+        peak_day = metrics.get('peak_day') or "highest consumption day in available data"
         actions.append({
             "title": "Investigate spike day",
-            "what": f"Review what was running on peak day {metrics.get('peak_day', 'unknown')} and avoid simultaneous heavy loads",
-            "when": "today",
+            "what": f"Review what was running on {peak_day} and avoid simultaneous heavy loads in the available dataset.",
+            "when": time_window,
             "impact": "high",
-            "urgency": "high",
+            "urgency": "high" if urgency == "high" else "medium",
         })
 
     if insights.get("high_base_load"):
         actions.append({
             "title": "Reduce after-hours load",
-            "what": "Check always-on equipment and switch off unnecessary loads after operating hours",
-            "when": "today",
+            "what": "Check always-on equipment and switch off unnecessary loads outside core operating hours.",
+            "when": time_window,
             "impact": "high",
-            "urgency": "high",
+            "urgency": "high" if urgency == "high" else "medium",
         })
 
     if insights.get("high_avg_consumption"):

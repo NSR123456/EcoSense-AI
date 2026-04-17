@@ -1,0 +1,151 @@
+building_id,date,consumption_kwh
+Academic Building,2024-01-01,237.38
+Academic Building,2024-01-02,215.31
+Academic Building,2024-01-03,242.97
+Academic Building,2024-01-04,273.76
+Academic Building,2024-01-05,212.4
+Academic Building,2024-01-06,197.56
+Academic Building,2024-01-07,261.17
+Academic Building,2024-01-08,247.91
+Academic Building,2024-01-09,204.77
+Academic Building,2024-01-10,240.34
+Academic Building,2024-01-11,205.28
+Academic Building,2024-01-12,205.35
+Academic Building,2024-01-13,215.27
+Academic Building,2024-01-14,139.99
+Academic Building,2024-01-15,161.73
+Academic Building,2024-01-16,202.57
+Academic Building,2024-01-17,186.95
+Academic Building,2024-01-18,233.55
+Academic Building,2024-01-19,190.92
+Academic Building,2024-01-20,158.42
+Academic Building,2024-01-21,259.3
+Academic Building,2024-01-22,215.25
+Academic Building,2024-01-23,225.66
+Academic Building,2024-01-24,173.58
+Academic Building,2024-01-25,204.55
+Academic Building,2024-01-26,227.63
+Academic Building,2024-01-27,168.62
+Academic Building,2024-01-28,222.2
+Academic Building,2024-01-29,203.18
+Academic Building,2024-01-30,195.67
+FBS Building,2024-01-01,312.45
+FBS Building,2024-01-02,298.73
+FBS Building,2024-01-03,325.18
+FBS Building,2024-01-04,342.67
+FBS Building,2024-01-05,287.34
+FBS Building,2024-01-06,276.89
+FBS Building,2024-01-07,331.45
+FBS Building,2024-01-08,318.92
+FBS Building,2024-01-09,289.67
+FBS Building,2024-01-10,307.23
+FBS Building,2024-01-11,278.45
+FBS Building,2024-01-12,285.67
+FBS Building,2024-01-13,296.78
+FBS Building,2024-01-14,234.56
+FBS Building,2024-01-15,245.78
+FBS Building,2024-01-16,287.34
+FBS Building,2024-01-17,267.89
+FBS Building,2024-01-18,312.45
+FBS Building,2024-01-19,278.34
+FBS Building,2024-01-20,245.67
+FBS Building,2024-01-21,334.56
+FBS Building,2024-01-22,298.73
+FBS Building,2024-01-23,307.89
+FBS Building,2024-01-24,256.78
+FBS Building,2024-01-25,287.34
+FBS Building,2024-01-26,312.45
+FBS Building,2024-01-27,267.89
+FBS Building,2024-01-28,298.73
+FBS Building,2024-01-29,278.34
+FBS Building,2024-01-30,267.89
+Admin Block,2024-01-01,198.34
+Admin Block,2024-01-02,187.56
+Admin Block,2024-01-03,203.45
+Admin Block,2024-01-04,218.67
+Admin Block,2024-01-05,178.34
+Admin Block,2024-01-06,167.89
+Admin Block,2024-01-07,207.45
+Admin Block,2024-01-08,198.92
+Admin Block,2024-01-09,179.67
+Admin Block,2024-01-10,197.23
+Admin Block,2024-01-11,168.45
+Admin Block,2024-01-12,175.67
+Admin Block,2024-01-13,186.78
+Admin Block,2024-01-14,134.56
+Admin Block,2024-01-15,145.78
+Admin Block,2024-01-16,187.34
+Admin Block,2024-01-17,167.89
+Admin Block,2024-01-18,198.45
+Admin Block,2024-01-19,178.34
+Admin Block,2024-01-20,145.67
+Admin Block,2024-01-21,214.56
+Admin Block,2024-01-22,188.73
+Admin Block,2024-01-23,197.89
+Admin Block,2024-01-24,156.78
+Admin Block,2024-01-25,187.34
+Admin Block,2024-01-26,198.45
+Admin Block,2024-01-27,167.89
+Admin Block,2024-01-28,188.73
+Admin Block,2024-01-29,178.34
+Admin Block,2024-01-30,167.89
+Library,2024-01-01,245.67
+Library,2024-01-02,234.56
+Library,2024-01-03,251.34
+Library,2024-01-04,267.89
+Library,2024-01-05,223.45
+Library,2024-01-06,213.78
+Library,2024-01-07,256.67
+Library,2024-01-08,247.34
+Library,2024-01-09,226.78
+Library,2024-01-10,245.34
+Library,2024-01-11,216.56
+Library,2024-01-12,223.78
+Library,2024-01-13,234.89
+Library,2024-01-14,182.56
+Library,2024-01-15,193.78
+Library,2024-01-16,234.67
+Library,2024-01-17,215.89
+Library,2024-01-18,245.67
+Library,2024-01-19,226.34
+Library,2024-01-20,193.67
+Library,2024-01-21,262.56
+Library,2024-01-22,236.73
+Library,2024-01-23,245.89
+Library,2024-01-24,204.78
+Library,2024-01-25,234.67
+Library,2024-01-26,245.78
+Library,2024-01-27,215.89
+Library,2024-01-28,236.73
+Library,2024-01-29,226.34
+Library,2024-01-30,215.89
+Auditorium,2024-01-01,156.78
+Auditorium,2024-01-02,145.67
+Auditorium,2024-01-03,162.34
+Auditorium,2024-01-04,178.89
+Auditorium,2024-01-05,134.45
+Auditorium,2024-01-06,124.78
+Auditorium,2024-01-07,167.67
+Auditorium,2024-01-08,158.34
+Auditorium,2024-01-09,137.78
+Auditorium,2024-01-10,156.34
+Auditorium,2024-01-11,127.56
+Auditorium,2024-01-12,134.78
+Auditorium,2024-01-13,145.89
+Auditorium,2024-01-14,93.56
+Auditorium,2024-01-15,104.78
+Auditorium,2024-01-16,145.67
+Auditorium,2024-01-17,126.89
+Auditorium,2024-01-18,156.78
+Auditorium,2024-01-19,137.34
+Auditorium,2024-01-20,104.67
+Auditorium,2024-01-21,173.56
+Auditorium,2024-01-22,147.73
+Auditorium,2024-01-23,156.89
+Auditorium,2024-01-24,115.78
+Auditorium,2024-01-25,145.67
+Auditorium,2024-01-26,156.78
+Auditorium,2024-01-27,126.89
+Auditorium,2024-01-28,147.73
+Auditorium,2024-01-29,137.34
+Auditorium,2024-01-30,126.89

@@ -2,196 +2,100 @@ import streamlit as st
 
 
 def render_homepage():
-    # Hero section with a beautiful background image
     st.markdown(
         """
         <style>
         .hero-section {
-            background-image: linear-gradient(rgba(0,0,0,0.5), rgba(0,0,0,0.5)), url('https://images.unsplash.com/photo-1473341304170-971dccb5ac1e?auto=format&fit=crop&q=80&w=2070');
+            background-image: linear-gradient(rgba(4, 120, 87, 0.9), rgba(6, 78, 59, 0.95)), url('https://images.unsplash.com/photo-1500534314209-a25ddb2bd429?auto=format&fit=crop&q=80&w=2070');
             background-size: cover;
             background-position: center;
             padding: 80px 40px;
-            border-radius: 15px;
+            border-radius: 18px;
             color: white;
             text-align: center;
             margin-bottom: 30px;
+            box-shadow: 0 14px 50px rgba(0, 0, 0, 0.18);
         }
         .hero-title {
-            font-size: 3.5rem;
+            font-size: 3.2rem;
             font-weight: 800;
             margin-bottom: 10px;
+            letter-spacing: -0.03em;
         }
         .hero-subtitle {
-            font-size: 1.5rem;
+            font-size: 1.4rem;
             font-weight: 400;
-            margin-bottom: 20px;
+            margin-bottom: 24px;
+            max-width: 900px;
+            margin-left: auto;
+            margin-right: auto;
+            line-height: 1.5;
         }
-        .stButton > button {
-            border-radius: 50% !important;
-            width: 45px !important;
-            height: 45px !important;
-            padding: 0px !important;
-            display: flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-            font-size: 20px !important;
-            background-color: rgba(255, 255, 255, 0.2) !important;
-            color: white !important;
-            border: 2px solid white !important;
-            transition: all 0.2s ease-in-out !important;
+        .hero-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 18px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.16);
+            border: 1px solid rgba(255, 255, 255, 0.24);
+            font-weight: 700;
+            color: #ECFDF5;
+            font-size: 0.95rem;
         }
-        .stButton > button:hover {
-            background-color: rgba(255, 255, 255, 0.5) !important;
-            transform: scale(1.1);
+        .story-card {
+            border-radius: 18px;
+            background: #ffffff;
+            padding: 28px;
+            box-shadow: 0 16px 40px rgba(15, 23, 42, 0.08);
+            border: 1px solid #E2E8F0;
+            margin-bottom: 18px;
+        }
+        .story-step {
+            font-size: 1.1rem;
+            font-weight: 700;
+            margin-bottom: 6px;
+        }
+        .story-body {
+            color: #475569;
+            line-height: 1.7;
+        }
+        .feature-pill {
+            display: inline-flex;
+            gap: 10px;
+            align-items: center;
+            background: #ECFDF5;
+            color: #065F46;
+            border-radius: 999px;
+            padding: 10px 16px;
+            margin-bottom: 10px;
+            font-weight: 700;
         }
         </style>
         <div class="hero-section">
-            <div class="hero-title">🌿 EcoSense AI</div>
-            <div class="hero-subtitle">Next-Generation Building Energy Intelligence</div>
-            <p style="font-size: 1.2rem; max-width: 800px; margin: 0 auto;">
-                Empowering operators with AI-driven insights to reduce waste, optimize consumption, and drive sustainability across every floor.
-            </p>
+            <div class="hero-title">Smart Energy Guardian</div>
+            <div class="hero-subtitle">Turn your campus energy CSV into a live building operations room. Track simulated hours, verify calendar context, and let AI alert you when true waste appears.</div>
+            <div class="hero-pill">Live simulation • schedule-aware • Gemini-powered • Telegram alerts</div>
         </div>
         """,
-        unsafe_allow_html=True
+        unsafe_allow_html=True,
     )
 
-    # First Slider: Core Utilities
-    st.subheader("Explore Our Core Utilities")
-    utility_options = [
-        "🔍 Smart Anomaly Detection",
-        "📊 Real-time Consumption Analytics",
-        "💡 AI-Powered Recommendations",
-        "🏢 Building Comparison & Normalization",
-        "📄 Automated Compliance Reporting"
-    ]
+    st.markdown("### How the Smart Energy Guardian operates")
+    st.write("From historic meters to proactive alerts, this system is designed to feel like a real operations command center.")
 
-    if "utility_index" not in st.session_state:
-        st.session_state.utility_index = 0
-
-    selected_utility = utility_options[st.session_state.utility_index]
-
-    image_urls = {
-        "🔍 Smart Anomaly Detection": "https://images.unsplash.com/photo-1551288049-bbbda536339a?auto=format&fit=crop&q=80&w=800",
-        "📊 Real-time Consumption Analytics": "https://images.unsplash.com/photo-1551288049-bbbda536339a?auto=format&fit=crop&q=80&w=800",
-        "💡 AI-Powered Recommendations": "https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&q=80&w=800",
-        "🏢 Building Comparison & Normalization": "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&q=80&w=800",
-        "📄 Automated Compliance Reporting": "https://images.unsplash.com/photo-1450101499163-c8848c66ca85?auto=format&fit=crop&q=80&w=800"
-    }
-
-    # Navigation logic for Utility Slider
-    col_l, col_m, col_r = st.columns([1, 10, 1])
-    with col_l:
-        st.write("<div style='height: 180px;'></div>", unsafe_allow_html=True)
-        if st.button("←", key="util_prev"):
-            st.session_state.utility_index = (st.session_state.utility_index - 1) % len(utility_options)
-            st.rerun()
-    with col_m:
-        st.image(image_urls[selected_utility], use_container_width=True, caption=selected_utility)
-        if selected_utility == "🔍 Smart Anomaly Detection":
-            st.markdown("### 🔍 Smart Anomaly Detection")
-            st.write("Never miss a spike again. Our AI monitors your building's energy pulse 24/7, identifying patterns that humans might overlook.")
-            st.info("✅ Detects leaks, equipment malfunctions, and schedule drifts instantly.")
-        elif selected_utility == "📊 Real-time Consumption Analytics":
-            st.markdown("### 📊 Real-time Consumption Analytics")
-            st.write("Visualize your energy data like never before. From high-level building trends to individual flat consumption.")
-            st.info("✅ Dynamic charts with hourly, daily, and weekly granularity.")
-        elif selected_utility == "💡 AI-Powered Recommendations":
-            st.markdown("### 💡 AI-Powered Recommendations")
-            st.write("Don't just see the problems—solve them. EcoSense provides prioritized, actionable steps to reduce your energy bill.")
-            st.info("✅ Tailored advice based on your building's unique consumption profile.")
-        elif selected_utility == "🏢 Building Comparison & Normalization":
-            st.markdown("### 🏢 Building Comparison & Normalization")
-            st.write("Compare apples to apples. Our normalization engine adjusts for building size, occupancy, and climate.")
-            st.info("✅ Benchmark your portfolio and identify top performers.")
-        elif selected_utility == "📄 Automated Compliance Reporting":
-            st.markdown("### 📄 Automated Compliance Reporting")
-            st.write("Generate professional energy audit reports in seconds. Perfect for management updates and regulatory compliance.")
-            st.info("✅ One-click PDF export with full data visualization.")
-    with col_r:
-        st.write("<div style='height: 180px;'></div>", unsafe_allow_html=True)
-        if st.button("→", key="util_next"):
-            st.session_state.utility_index = (st.session_state.utility_index + 1) % len(utility_options)
-            st.rerun()
+    step1, step2 = st.columns(2)
+    with step1:
+        st.markdown("<div class='story-card'><div class='story-step'>1. Time-Travel Engine</div><div class='story-body'>Your ASHRAE dataset is replayed row by row, like a VCR. The simulator writes hourly meter readings into a live Google Sheet to create a realistic, unfolding energy stream.</div></div>", unsafe_allow_html=True)
+        st.markdown("<div class='story-card'><div class='story-step'>3. The Brain Trust</div><div class='story-body'>Three AI agents work together: Analyst, Strategic Planner, and Recommender. They detect anomalies, compare against events, and suggest the best corrective action.</div></div>", unsafe_allow_html=True)
+    with step2:
+        st.markdown("<div class='story-card'><div class='story-step'>2. Digital Twin</div><div class='story-body'>Your Google Sheet becomes a live campus twin. One tab streams current meter data, another stores the campus schedule, and the system interprets numbers in context.</div></div>", unsafe_allow_html=True)
+        st.markdown("<div class='story-card'><div class='story-step'>4. Proactive Messenger</div><div class='story-body'>When a true waste event is confirmed, the system sends a Telegram alert and keeps you in the loop. You can also query `/status` to see current performance at any time.</div></div>", unsafe_allow_html=True)
 
     st.divider()
 
-    # Second Slider: App Walkthrough (Replacing the private video)
-    st.subheader("How EcoSense Works")
-    walkthrough_steps = [
-        "Step 1: Ingest Data",
-        "Step 2: AI Collaboration",
-        "Step 3: Root Cause Analysis",
-        "Step 4: Execute Actions",
-        "Step 5: Verify Savings"
-    ]
-    walkthrough_images = {
-        "Step 1: Ingest Data": "https://images.unsplash.com/photo-1558494949-ef010cbdcc31?auto=format&fit=crop&q=80&w=800",
-        "Step 2: AI Collaboration": "https://images.unsplash.com/photo-1517245386807-bb43f82c33c4?auto=format&fit=crop&q=80&w=800",
-        "Step 3: Root Cause Analysis": "https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&q=80&w=800",
-        "Step 4: Execute Actions": "https://images.unsplash.com/photo-1513506003901-1e6a229e2d15?auto=format&fit=crop&q=80&w=800",
-        "Step 5: Verify Savings": "https://images.unsplash.com/photo-1554224155-1696413565d3?auto=format&fit=crop&q=80&w=800"
-    }
-    
-    if "walkthrough_index" not in st.session_state:
-        st.session_state.walkthrough_index = 0
-    
-    selected_step = walkthrough_steps[st.session_state.walkthrough_index]
-    
-    col_wl, col_wm, col_wr = st.columns([1, 10, 1])
-    with col_wl:
-        st.write("<div style='height: 180px;'></div>", unsafe_allow_html=True)
-        if st.button("←", key="walk_prev"):
-            st.session_state.walkthrough_index = (st.session_state.walkthrough_index - 1) % len(walkthrough_steps)
-            st.rerun()
-    with col_wm:
-        st.image(walkthrough_images[selected_step], use_container_width=True, caption=selected_step)
-        if selected_step == "Step 1: Ingest Data":
-            st.write("Connect your meters and upload utility bills. EcoSense handles structured and unstructured data seamlessly.")
-        elif selected_step == "Step 2: AI Collaboration":
-            st.write("Watch specialized agents—Planner, Multimodal, Synthesizer—work together to interpret your building's data.")
-        elif selected_step == "Step 3: Root Cause Analysis":
-            st.write("Identify exactly why inefficiencies occur, from equipment schedule drifts to occupancy-based waste.")
-        elif selected_step == "Step 4: Execute Actions":
-            st.write("Get prioritized, actionable tasks with clear urgency and expected impact for your facility team.")
-        elif selected_step == "Step 5: Verify Savings":
-            st.write("Monitor the impact of your actions and generate reports to demonstrate ROI to management.")
-    with col_wr:
-        st.write("<div style='height: 180px;'></div>", unsafe_allow_html=True)
-        if st.button("→", key="walk_next"):
-            st.session_state.walkthrough_index = (st.session_state.walkthrough_index + 1) % len(walkthrough_steps)
-            st.rerun()
-
-    st.divider()
-
-    # Features Grid
-    st.subheader("Key Features at a Glance")
-    f1, f2, f3 = st.columns(3)
-    with f1:
-        st.markdown("#### 🤖 Agent Theater")
-        st.write("Watch our AI agents collaborate to solve complex energy puzzles in real-time.")
-    with f2:
-        st.markdown("#### 🔄 Decision Workflow")
-        st.write("A structured path from issue detection to root cause and finally, action.")
-    with f3:
-        st.markdown("#### 📱 Mobile Ready")
-        st.write("Monitor your buildings and receive alerts on the go with our responsive design.")
-
-    st.caption("Ready to transform your energy management? Sign in using the sidebar to begin.")
-
-    st.divider()
-
-    # Features Grid
-    st.subheader("Key Features at a Glance")
-    f1, f2, f3 = st.columns(3)
-    with f1:
-        st.markdown("#### 🤖 Agent Theater")
-        st.write("Watch our AI agents collaborate to solve complex energy puzzles in real-time.")
-    with f2:
-        st.markdown("#### 🔄 Decision Workflow")
-        st.write("A structured path from issue detection to root cause and finally, action.")
-    with f3:
-        st.markdown("#### 📱 Mobile Ready")
-        st.write("Monitor your buildings and receive alerts on the go with our responsive design.")
-
-    st.caption("Ready to transform your energy management? Sign in using the sidebar to begin.")
+    st.markdown("### Why this app works for your class project")
+    st.markdown("- **Autonomous audit workflow**: The agents do the work, you build the system.")
+    st.markdown("- **Context-aware intelligence**: Schedule data makes the AI smarter than raw threshold alerts.")
+    st.markdown("- **Low resource, high impact**: Uses cloud APIs sparingly with a demo-ready student laptop profile.")
+    st.success("Ready to start your live energy operations demo? Log in from the sidebar to enter the command center.")

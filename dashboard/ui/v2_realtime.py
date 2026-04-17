@@ -1,22 +1,37 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
-from src.services.google_sheets import DatabaseManager
 from datetime import datetime
+from src.services.google_sheets import DatabaseManager
 
-def render_v2_realtime_ui():
+try:
+    from streamlit import st_autorefresh
+except Exception:
+    st_autorefresh = None
+
+
+def render_v2_realtime_ui(db: DatabaseManager | None = None, focus_building: str | None = None):
     st.markdown("## ⚡ EcoSense v2: Real-time Multi-Agent Audit")
-    
+    if st_autorefresh is not None:
+        st_autorefresh(interval=12000, key="live_realtime_refresh")
+
     col_header, col_refresh = st.columns([4, 1])
     with col_header:
         st.info("Streaming live energy data from Google Sheets and monitoring with autonomous agents.")
     with col_refresh:
         if st.button("🔄 Refresh Data", use_container_width=True):
-            st.rerun()
+            st.experimental_rerun()
 
-    db = DatabaseManager()
-    
-    # --- 1. DATA STREAM VIEW ---
+    if db is None:
+        db = DatabaseManager()
+
+    sheet_ready = db.is_ready()
+    if not sheet_ready:
+        st.warning(
+            "Google Sheets is not configured. This demo is running with local fallback data only. "
+            "Set GOOGLE_SHEET_ID and GOOGLE_APPLICATION_CREDENTIALS in .env for full cloud sync."
+        )
+
     st.subheader("📊 Live Energy Stream (Active_Stream)")
     stream_data = db.read_tab("Active_Stream")
     
@@ -26,8 +41,14 @@ def render_v2_realtime_ui():
 
     df_stream = pd.DataFrame(stream_data)
     df_stream["consumption_kwh"] = pd.to_numeric(df_stream["consumption_kwh"], errors="coerce")
-    df_stream["date"] = pd.to_datetime(df_stream["date"])
-    
+    df_stream["date"] = pd.to_datetime(df_stream["date"], errors="coerce")
+
+    if focus_building and focus_building != "All":
+        df_stream = df_stream[df_stream["building_id"] == focus_building]
+        if df_stream.empty:
+            st.warning(f"No live stream records found for building {focus_building}.")
+            return
+
     # Live Chart
     fig = go.Figure()
     # Regular data
@@ -63,6 +84,8 @@ def render_v2_realtime_ui():
     with c1:
         st.subheader("📜 Agent Audit Ledger")
         ledger_data = db.read_tab("Audit_Ledger")
+        if focus_building and focus_building != "All" and ledger_data:
+            ledger_data = [row for row in ledger_data if row.get("building_id") == focus_building]
         if ledger_data:
             df_ledger = pd.DataFrame(ledger_data)
             st.dataframe(df_ledger.sort_values("timestamp", ascending=False), use_container_width=True)
@@ -77,6 +100,16 @@ def render_v2_realtime_ui():
             st.table(df_schedule[["event_name", "date", "start_time"]])
         else:
             st.info("Schedule is empty.")
+
+    if stream_data:
+        df_download = pd.DataFrame(stream_data)
+        csv_bytes = df_download.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="Download live stream snapshot",
+            data=csv_bytes,
+            file_name="ecosense_active_stream.csv",
+            mime="text/csv",
+        )
 
     # --- 3. SYSTEM CONTROLS ---
     st.divider()
