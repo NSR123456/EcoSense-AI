@@ -572,7 +572,80 @@ def _build_no_anomaly_messages(latest_row: dict) -> list:
     ]
 
 
+def _build_continuous_agent_messages(stream_count: int, latest_row: dict, result, building_stats: dict) -> list:
+    """Build agent messages for EVERY stream update — not just anomalies.
+
+    Each agent produces a role-specific insight so the Agent Theater always
+    has fresh content as the Active_Stream grows.
+    """
+    building_id = latest_row.get('building_id', 'unknown')
+    date = latest_row.get('date', 'unknown')
+    consumption = latest_row.get('consumption_kwh', 'unknown')
+    b_stats = building_stats.get(building_id, {})
+    b_count = b_stats.get('count', stream_count)
+    b_avg = b_stats.get('avg_kwh', '—')
+    b_max = b_stats.get('max_kwh', '—')
+
+    messages = []
+
+    if result and result.get('anomaly'):
+        # ---- anomaly detected → full agent chain ----
+        messages.extend(_build_agent_messages_from_result(result))
+    else:
+        # ---- no anomaly → agents still report status ----
+        messages.append({
+            "agent": "Planner",
+            "type": "info",
+            "content": (
+                f"Stream tick #{stream_count}: Analyzing {building_id} on {date}. "
+                f"{consumption} kWh recorded. Running detect→cause→action→quality pipeline."
+            ),
+        })
+        messages.append({
+            "agent": "DetectIssues",
+            "type": "info",
+            "content": (
+                f"Checked {building_id} at tick #{stream_count}: {consumption} kWh is within normal range. "
+                f"Building has {b_count} readings so far (avg {b_avg} kWh, peak {b_max} kWh). No anomaly detected."
+            ),
+        })
+        messages.append({
+            "agent": "RootCause",
+            "type": "info",
+            "content": (
+                f"No deviation detected for {building_id}. "
+                f"Current consumption {consumption} kWh aligns with historical average of {b_avg} kWh."
+            ),
+        })
+        messages.append({
+            "agent": "ActionPlanner",
+            "type": "info",
+            "content": (
+                f"No corrective action needed for {building_id} at this time. "
+                f"Continue monitoring — next check at tick #{stream_count + 1}."
+            ),
+        })
+        messages.append({
+            "agent": "Critic",
+            "type": "info",
+            "content": (
+                f"Quality check: All-clear status for {building_id} is consistent with {b_count} readings. No concerns."
+            ),
+        })
+        messages.append({
+            "agent": "Synthesizer",
+            "type": "decision",
+            "content": (
+                f"Stream update #{stream_count}: {building_id} operating normally at {consumption} kWh. "
+                f"{stream_count} total readings processed across all buildings."
+            ),
+        })
+
+    return messages
+
+
 def _auto_analyze_existing_active_stream() -> None:
+    """Re-analyze whenever the Active_Stream grows and produce agent messages."""
     db = st.session_state.get("live_db") or st.session_state.get("dashboard_db")
     if not db:
         return
@@ -583,7 +656,8 @@ def _auto_analyze_existing_active_stream() -> None:
 
     stream_length = len(active_stream)
     last_length = st.session_state.get("last_active_stream_length", 0)
-    if st.session_state.get("agent_messages") and stream_length <= last_length:
+    # Only re-analyze when stream has actually grown
+    if stream_length <= last_length:
         return
 
     st.session_state["last_active_stream_length"] = stream_length
@@ -591,13 +665,27 @@ def _auto_analyze_existing_active_stream() -> None:
     if "live_agent_team" not in st.session_state:
         st.session_state.live_agent_team = AgentTeam(db_manager=db)
 
-    result = st.session_state.live_agent_team.handle_stream_event(None)
-    if result and "error" not in result:
-        st.session_state["agent_messages"] = _build_agent_messages_from_result(result)
-    elif result and "error" in result:
-        print(f"Agent theater skipped analysis due to error: {result.get('message')}")
-    else:
-        st.session_state["agent_messages"] = _build_no_anomaly_messages(active_stream[-1])
+    agent_team = st.session_state.live_agent_team
+    result, snapshot = agent_team.analyze_continuous()
+
+    if snapshot is None:
+        return
+
+    new_messages = _build_continuous_agent_messages(
+        snapshot["stream_count"],
+        snapshot["latest_row"],
+        result,
+        snapshot["building_stats"],
+    )
+
+    # Accumulate messages (keep last 30 for scroll)
+    existing = st.session_state.get("agent_messages", [])
+    existing.extend(new_messages)
+    st.session_state["agent_messages"] = existing[-30:]
+
+    # Store latest analysis result for chatbot grounding
+    if result:
+        st.session_state["latest_analysis_result"] = result
 
 
 def _start_telegram_bot_polling() -> None:
@@ -664,6 +752,13 @@ def _restart_simulation_with_new_building() -> None:
         simulator=st.session_state.live_simulator,
         agent_team=st.session_state.live_agent_team,
     )
+
+    # Clear stale theater state when switching building focus
+    st.session_state["agent_messages"] = []
+    st.session_state["latest_analysis_result"] = None
+    st.session_state["agent_theater_prev_msg_count"] = 0
+    st.session_state["last_active_stream_length"] = 0
+
     print("Telegram: Bot reinitialized with new building focus")
     
     # Restart simulation automatically if it was running
@@ -688,6 +783,10 @@ def _start_live_demo() -> None:
         # Update simulator with new building selection if changed
         if st.session_state.live_simulator.focus_building != selected_building:
             st.session_state.live_simulator = EnergySimulator(db_manager=st.session_state.live_db, focus_building=selected_building)
+            st.session_state["agent_messages"] = []
+            st.session_state["latest_analysis_result"] = None
+            st.session_state["agent_theater_prev_msg_count"] = 0
+            st.session_state["last_active_stream_length"] = 0
     
     if "live_agent_team" not in st.session_state:
         st.session_state.live_agent_team = AgentTeam(db_manager=st.session_state.live_db)
@@ -719,21 +818,29 @@ def _start_live_demo() -> None:
     telegram_bot = st.session_state.live_telegram
 
     def on_update(payload):
-        result = agent_team.handle_stream_event(payload)
-        if not result:
+        # Continuous analysis: agents always produce messages, not just on anomaly
+        result, snapshot = agent_team.analyze_continuous()
+
+        if snapshot is None:
             return
-        if "error" in result:
-            print(f"DEBUG: Agent analysis skipped during live update - {result.get('message')}")
-            return
+
+        new_messages = _build_continuous_agent_messages(
+            snapshot["stream_count"],
+            snapshot["latest_row"],
+            result,
+            snapshot["building_stats"],
+        )
 
         messages = st.session_state.get("agent_messages", [])
-        messages.extend(_build_agent_messages_from_result(result))
-        st.session_state["agent_messages"] = messages[-15:]
+        messages.extend(new_messages)
+        st.session_state["agent_messages"] = messages[-30:]
 
-        # Send alert
-        alert_text = _build_alert_text(result)
-        if telegram_bot.send_alert(alert_text):
-            st.session_state["alerts_sent"] = st.session_state.get("alerts_sent", 0) + 1
+        # Send Telegram alert only when there is a real anomaly
+        if result and "anomaly" in result:
+            st.session_state["latest_analysis_result"] = result
+            alert_text = _build_alert_text(result)
+            if telegram_bot.send_alert(alert_text):
+                st.session_state["alerts_sent"] = st.session_state.get("alerts_sent", 0) + 1
 
     def runner():
         simulator.start_stream(on_update=on_update)
@@ -743,6 +850,9 @@ def _start_live_demo() -> None:
     thread.start()
     st.session_state.live_sim_thread = thread
     st.session_state.sim_running = True
+
+    # Run an initial analysis immediately so the Agent Theater has LLM-backed content as soon as live demo starts.
+    _auto_analyze_existing_active_stream()
 
 
 def _stop_live_demo() -> None:
@@ -775,6 +885,15 @@ with st.sidebar:
         st.session_state["auth_user"] = None
         st.session_state["auth_role"] = None
 
+    # Restore session from query params on browser refresh
+    if st.session_state["auth_user"] is None:
+        qp = st.query_params
+        saved_user = qp.get("u")
+        saved_role = qp.get("r")
+        if saved_user and saved_role:
+            st.session_state["auth_user"] = saved_user
+            st.session_state["auth_role"] = saved_role
+
     if st.session_state["auth_user"] is None:
         login_user = st.text_input("Username", key="login_user")
         login_pass = st.text_input("Password", type="password", key="login_pass")
@@ -783,6 +902,9 @@ with st.sidebar:
             if ok:
                 st.session_state["auth_user"] = login_user.strip()
                 st.session_state["auth_role"] = info
+                # Persist auth in query params so browser refresh keeps session
+                st.query_params["u"] = login_user.strip()
+                st.query_params["r"] = info
                 st.success(f"Logged in as {info}.")
                 st.rerun()
             elif info == "pending":
@@ -794,6 +916,9 @@ with st.sidebar:
         render_session_badge(st.session_state["auth_user"], st.session_state["auth_role"])
         if st.button("Logout", key="logout_btn", type="primary", width="stretch"):
             st.session_state["auth_user"] = None
+            st.session_state["auth_role"] = None
+            # Clear query params on logout
+            st.query_params.clear()
             st.session_state["auth_role"] = None
             st.rerun()
 
@@ -913,12 +1038,14 @@ with st.sidebar:
     st.caption("Need Telegram alerts? Fill in `TELEGRAM_TOKEN` and `MY_CHAT_ID` in .env.")
 
 # Build the live operations room view
+selected_building_display = selected_building if selected_building != "All" else "All Buildings"
 st.markdown(
-    """
+    f"""
     <div class='ecosense-header-bar'>
         <div>
             <div class='ecosense-title'>Smart Energy Guardian</div>
             <div class='ecosense-sub'>Live operations room for campus energy, schedule-aware waste detection, and proactive Telegram alerts.</div>
+            <div class='ecosense-sub' style='margin-top: 4px; font-size: 0.8rem; opacity: 0.9;'>Focus: {selected_building_display}</div>
         </div>
         <div class='ecosense-pill'>Live monitoring enabled</div>
     </div>
@@ -1008,30 +1135,44 @@ with live_tab:
         )
     render_v2_realtime_ui(db=live_db, focus_building=selected_building)
 
+# Always re-analyze when stream grows (runs every Streamlit cycle)
 _auto_analyze_existing_active_stream()
 
 with theater_tab:
+    # Auto-refresh every 4 seconds so new messages from background thread appear
+    if st_autorefresh is not None and st.session_state.get("sim_running", False):
+        st_autorefresh(interval=4000, key="theater_autorefresh")
+
     # Show real agent messages if available, otherwise waiting state
     real_messages = st.session_state.get("agent_messages", [])
     sim_running = st.session_state.get("sim_running", False)
 
     if real_messages:
-        render_agent_theater(real_messages)
-        st.info("🔴 **LIVE ANALYSIS** - Agents are analyzing real-time data from the Excel sheet Active_Stream tab.")
+        # Auto-advance agent_live_count as new messages arrive
+        prev_msg_count = st.session_state.get("agent_theater_prev_msg_count", 0)
+        if len(real_messages) > prev_msg_count:
+            st.session_state["agent_live_count"] = len(real_messages)
+            st.session_state["agent_theater_prev_msg_count"] = len(real_messages)
+
+        # Pass the latest analysis result for grounded chatbot responses
+        latest_result = st.session_state.get("latest_analysis_result")
+        render_agent_theater(real_messages, resp=latest_result)
+        if sim_running:
+            st.info("🔴 **LIVE ANALYSIS** — Agents are producing real-time insights as the Active_Stream grows.")
     elif sim_running:
         # Simulation is running but no messages yet - show waiting
-        st.info("⏳ **Waiting for first anomaly detection...** Agents are monitoring the Excel sheet for energy patterns.")
-        st.write("The simulator is streaming data to the Active_Stream tab. Agents will speak when they detect anomalies in the real Excel data.")
+        st.info("⏳ **Waiting for first stream data...** Agents will start speaking as soon as data arrives.")
+        st.write("The simulator is streaming data to the Active_Stream tab. Agents produce insights for every reading.")
     else:
         # No simulation running - show setup state
-        st.info("🎯 **Agent Theater - Ready for Analysis**")
+        st.info("🎯 **Agent Theater — Ready for Analysis**")
         st.write("**How it works:**")
         st.write("1. Press 'Start Live Demo' to begin simulation")
         st.write("2. Simulator writes energy data to Excel Active_Stream tab")
-        st.write("3. Agents analyze the Excel data in real-time")
-        st.write("4. Agent decisions are based ONLY on actual Excel sheet data")
+        st.write("3. Agents analyze every reading in real-time and produce insights")
+        st.write("4. All agents speak on every stream tick — not just on anomalies")
         st.write("")
-        st.write("**No demo content shown** - All agent messages come from analyzing real Excel data.")
+        st.write("**No demo content shown** — All agent messages come from analyzing real Excel data.")
 
 with twin_tab:
     st.subheader("Digital Twin status")

@@ -204,12 +204,42 @@ def _specialized_takeaway(agent: str, content: str) -> str:
     return "Specialized output ready."
 
 
+def _build_context_from_agent_messages() -> str:
+    """Build a QA context string from accumulated agent messages in session state."""
+    import streamlit as _st
+    messages = _st.session_state.get("agent_messages", [])
+    if not messages:
+        return ""
+    # Take the last 12 messages for context
+    recent = messages[-12:]
+    lines = []
+    for m in recent:
+        agent = m.get("agent", "Agent")
+        content = m.get("content", "")
+        lines.append(f"{agent}: {content}")
+    return "\n".join(lines)
+
+
 def _llm_operator_answer(question: str, resp: dict) -> str:
     ruled = _rule_based_operator_answer(question, resp or {})
     if ruled:
         return ruled
 
-    context = _build_context_for_qa(resp)
+    # Build context from resp if available, otherwise from agent messages
+    has_resp_data = (
+        resp and isinstance(resp, dict)
+        and any(key in resp for key in ['issues', 'actions', 'metrics', 'issue_card', 'cause_card', 'action_card'])
+    )
+
+    if has_resp_data:
+        context = _build_context_for_qa(resp)
+    else:
+        # Fallback: use accumulated agent messages as context
+        context = _build_context_from_agent_messages()
+        if not context:
+            # No data at all — give a useful fallback instead of "refresh"
+            return _answer_operator_question(question)
+
     prompt = (
         "You are an energy operations assistant for low-literacy building operators. "
         "Answer in very simple English, 2-4 short lines, practical and action-first. "
@@ -220,9 +250,13 @@ def _llm_operator_answer(question: str, resp: dict) -> str:
         "Answer:"
     )
     text = generate(prompt, max_length=120).strip()
+
+    # Reject low-quality echo/paraphrase outputs
     if text and not _looks_like_echo(question, text):
         return text
-    return _answer_operator_question(question)
+    else:
+        # Fallback to rule-based answer
+        return _answer_operator_question(question)
 
 
 def _rag_stats(resp: dict | None) -> dict:
@@ -826,20 +860,32 @@ def render_agent_theater(messages: list, resp: dict | None = None):
             """
         )
 
-    # True live group-chat mode
-    conv_key = "||".join([f"{m.get('agent','')}::{m.get('type','')}::{m.get('content','')}" for m in sorted_messages])
-    if st.session_state.get("agent_conv_key") != conv_key:
-        st.session_state["agent_conv_key"] = conv_key
-        st.session_state["agent_live_count"] = 0
+    # ── Live group-chat mode ──────────────────────────────────────────
+    # Track conversation changes without resetting live_count to 0 every
+    # time new messages arrive (that was causing the "stuck at typing" bug).
+    if "agent_user_thread" not in st.session_state:
         st.session_state["agent_user_thread"] = []
 
+    sim_running = st.session_state.get("sim_running", False)
+    selected_building = st.session_state.get("selected_building", "All")
+
+    # When simulation is running, always show ALL messages (auto-advance)
+    if sim_running:
+        st.session_state["agent_live_count"] = len(sorted_messages)
+    elif st.session_state.get("agent_live_count", 0) == 0 and sorted_messages:
+        st.session_state["agent_live_count"] = 1
+
     st.subheader("Live Agent Group Chat")
-    st.caption("Agents enter one-by-one like a messenger group. You can type in the same thread.")
+    if sim_running:
+        st.success(f"🟢 Live demo active for {selected_building}. Agents are producing insights in real-time as the stream grows.")
+    else:
+        st.info("Start the live demo to see agents respond in real-time to your building's energy data.")
+    st.caption("Agents speak on every stream tick. Scroll down to see the latest messages.")
 
     c1, c2, c3 = st.columns([1, 1, 1.4])
     with c1:
         if st.button("Start / Restart Live", key="agent_live_restart"):
-            st.session_state["agent_live_count"] = 1
+            st.session_state["agent_live_count"] = len(sorted_messages)
             st.session_state["agent_user_thread"] = []
             st.rerun()
     with c2:
@@ -847,109 +893,91 @@ def render_agent_theater(messages: list, resp: dict | None = None):
             st.session_state["agent_live_count"] = min(len(sorted_messages), st.session_state.get("agent_live_count", 0) + 1)
             st.rerun()
     with c3:
-        auto_play = st.toggle("Auto-play replies", value=False, key="agent_live_autoplay")
+        auto_play = st.toggle("Auto-play replies", value=sim_running, key="agent_live_autoplay")
 
     live_count = st.session_state.get("agent_live_count", 0)
-    st.progress(0 if not sorted_messages else live_count / len(sorted_messages))
+    st.progress(0 if not sorted_messages else min(1.0, live_count / max(1, len(sorted_messages))))
+    st.caption(f"Showing {live_count} of {len(sorted_messages)} agent messages")
 
+    # Render visible messages
     for idx, m in enumerate(sorted_messages[:live_count]):
         agent = m.get("agent", "Agent")
         icon = ICONS.get(agent, "🤖")
         mtype_raw = str(m.get("type", "info")).lower()
         mtype = TYPE_LABELS.get(mtype_raw, "Update")
-        main_line = _film_line(agent, str(m.get("content", "")))
-        chunks = _detail_chunks(agent, str(m.get("content", "")))
+        content_text = str(m.get("content", ""))
         role = ROLE_DESCRIPTIONS.get(agent, "Specialized assistant")
 
         with st.chat_message(name=agent, avatar=icon):
             st.markdown(f"**{agent} · {mtype}**")
-            st.markdown(main_line)
-            st.markdown(f"**My role:** {role}")
-            
-            # Add LLM-generated simple explanation
-            simple_explanation = _generate_simple_explanation(agent, str(m.get("content", "")))
-            if simple_explanation:
-                with st.expander("💡 Simple Explanation (What this means for you)", expanded=False):
-                    st.markdown(simple_explanation)
-            
-            # Add learning/action guidance
-            guidance = _get_operator_guidance(agent, str(m.get("content", "")))
-            if guidance:
-                st.info(f"📝 **What to learn:** {guidance}")
-            
-            for c in chunks:
-                st.markdown(f"- {c}")
 
-            if agent == "DetectIssues":
+            # Show the REAL content from the agent (the actual insight)
+            st.markdown(content_text)
+
+            # Role description (collapsed for brevity during live streaming)
+            with st.expander(f"ℹ️ About {agent}", expanded=False):
+                st.markdown(f"**Role:** {role}")
+                guidance = _get_operator_guidance(agent, content_text)
+                if guidance:
+                    st.markdown(f"📝 {guidance}")
+
+            # Special rendering for anomaly-related messages
+            if agent == "DetectIssues" and mtype_raw == "finding":
                 issue_list = (resp or {}).get("issues", []) if isinstance(resp, dict) else []
-                metrics = (resp or {}).get("metrics", {}) if isinstance(resp, dict) else {}
-                anomaly_count = metrics.get("anomaly_count")
                 if issue_list:
-                    st.markdown("**🔍 What problems I found:**")
-                    for issue in issue_list:
+                    st.markdown("**🔍 Issues detected:**")
+                    for issue in issue_list[:3]:
                         name = issue.get("name", "Unnamed issue")
                         sev = str(issue.get("severity", "unknown")).title()
                         conf = issue.get("confidence")
                         conf_text = f"{int(round(conf * 100))}%" if isinstance(conf, (int, float)) else "N/A"
-                        
-                        # Make severity more understandable
-                        sev_explanation = {
-                            "High": "⚠️ Urgent - Fix soon to save energy",
-                            "Medium": "🟡 Important - Address when possible", 
-                            "Low": "ℹ️ Minor - Monitor but not critical"
-                        }.get(sev, f"Severity: {sev}")
-                        
-                        # Make confidence more understandable
-                        conf_level = "Very sure" if isinstance(conf, (int, float)) and conf > 0.8 else "Fairly sure" if isinstance(conf, (int, float)) and conf > 0.6 else "Somewhat sure"
-                        
-                        st.markdown(f"• **{name}**")
-                        st.markdown(f"  - {sev_explanation}")
-                        st.markdown(f"  - **How sure I am:** {conf_level} ({conf_text})")
-                if anomaly_count is not None:
-                    anomaly_explanation = "unusual energy readings" if anomaly_count < 20 else "many unusual energy readings" if anomaly_count < 50 else "very many unusual energy readings"
-                    st.markdown(
-                        f"**📊 Energy pattern analysis:** Found {anomaly_count} {anomaly_explanation} "
-                        "that don't match normal building usage."
-                    )
+                        sev_emoji = {"High": "🔴", "Medium": "🟡", "Low": "🟢"}.get(sev, "⚪")
+                        st.markdown(f"  {sev_emoji} **{name}** — {sev} severity, {conf_text} confidence")
 
-            if agent == "ActionPlanner":
-                st.info("Operator action: Start this task first today for best impact.")
-            elif agent == "Critic":
-                st.info("Quality gate: Advice is checked before final output.")
-            elif agent == "Synthesizer":
-                st.success("Final decision ready. Move to Decision Center to execute.")
+            if agent == "ActionPlanner" and mtype_raw == "proposal":
+                st.info("⚡ Operator action: Start this task first today for best impact.")
+            elif agent == "Synthesizer" and mtype_raw == "decision":
+                st.success("📌 Summary ready. Check Decision Center for full action plan.")
 
+        # Handoff indicator between different agents
         if idx < live_count - 1:
             next_agent = sorted_messages[idx + 1].get("agent", "Agent")
-            st.caption(f"-> Handoff to {next_agent}")
+            if next_agent != agent:
+                st.caption(f"→ Handoff to {next_agent}")
 
-    if 0 < live_count < len(sorted_messages):
-        next_agent = sorted_messages[live_count].get("agent", "Agent")
-        next_icon = ICONS.get(next_agent, "🤖")
-        with st.chat_message(name="system", avatar="💬"):
-            st.markdown(f"**{next_icon} {next_agent} is typing...**")
+    # Live streaming indicator (only when sim is running and more data is expected)
+    if sim_running and live_count > 0:
+        st.markdown(
+            '<div style="text-align:center; padding:8px; color:#059669; font-weight:700;">'
+            '🔄 Waiting for next stream tick… agents will respond automatically'
+            '</div>',
+            unsafe_allow_html=True,
+        )
 
     # User can chat in the same messenger thread
-    if "agent_user_thread" not in st.session_state:
-        st.session_state["agent_user_thread"] = []
     for turn in st.session_state["agent_user_thread"][-8:]:
         with st.chat_message(name="user", avatar="🙂"):
             st.markdown(turn["q"])
         with st.chat_message(name="AI Team", avatar="🤝"):
             st.markdown(turn["a"])
 
-    user_msg = st.chat_input("Type in group: Ask anything about issue, cause, action, confidence...")
+    user_msg = st.chat_input(
+        placeholder="Type in group: Ask anything about issue, cause, action, confidence, or building summary...",
+        key="agent_user_input"
+    )
     if user_msg and user_msg.strip():
         answer = _llm_operator_answer(user_msg.strip(), resp or {})
         st.session_state["agent_user_thread"].append({"q": user_msg.strip(), "a": answer})
         st.rerun()
 
-    if auto_play and live_count < len(sorted_messages):
+    # Auto-play: advance one message at a time when not in sim mode
+    if auto_play and not sim_running and live_count < len(sorted_messages):
         time.sleep(1.1)
         st.session_state["agent_live_count"] = min(len(sorted_messages), live_count + 1)
         st.rerun()
 
     return
+
 
     # Step playback controls
     max_steps = len(sorted_messages)

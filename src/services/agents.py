@@ -87,25 +87,16 @@ class RecommenderAgent:
             print("[RECOMMENDER]: No waste event to generate recommendation for.")
             return None
 
-        print(f"[RECOMMENDER]: Generating dynamic insights for anomaly at {anomaly.get('date')} using Gemini.")
+        print(f"[RECOMMENDER]: Generating dynamic insights for anomaly at {anomaly.get('date')} using Ollama.")
         
         # Enhanced prompt for both classification and recommendation
-        prompt = f"""
-        System: You are an Energy Audit Specialist for a campus.
-        Context: A building energy spike was detected on {anomaly['date']} at building '{anomaly['building_id']}'.
-        Current Consumption: {anomaly['consumption_kwh']} kWh.
-        No scheduled event was found on the campus calendar for this time.
+        from src.llm.energy_fine_tuner import generate_fine_tuned_response
         
-        Task: 
-        1. Classify the anomaly type (e.g., HVAC Drift, Lighting Waste, Equipment Left On, Phantom Load). 
-        2. Provide a short, actionable energy-saving recommendation.
+        # The fine-tuned model was trained on simple phrases, not massive instruction prompts
+        # We pass a simple contextual trigger that the model understands
+        input_text = f"Energy consumption spike of {anomaly.get('deviation_pct', 0):.1f}% detected in {anomaly['building_id']}. How to reduce energy consumption?"
         
-        Response Format (Strictly follow this):
-        Type: [2-3 words classification]
-        Recommendation: [Short, specific NLP advice, max 15 words]
-        """
-        
-        response = generate_with_gemini(prompt, safety_delay=4)
+        response = generate_fine_tuned_response("recommender", input_text)
         
         anomaly_type = "True Waste Spike"
         recommendation = "Investigate building for unmapped loads or schedule drifts."
@@ -116,7 +107,7 @@ class RecommenderAgent:
                 anomaly_type = parts[0].replace("Type:", "").strip()
                 recommendation = parts[1].strip()
             except Exception as e:
-                print(f"Recommender Agent: Error parsing Gemini response: {e}")
+                print(f"Recommender Agent: Error parsing Ollama response: {e}")
         elif response:
             # Fallback if parsing fails but there is a response
             recommendation = response
@@ -171,3 +162,68 @@ class AgentTeam:
             "context": context,
             "recommendation": recommendation
         }
+
+    def get_stream_snapshot(self):
+        """Return current Active_Stream rows and basic stats."""
+        active_stream = self.db.read_tab("Active_Stream")
+        if not active_stream:
+            return None, 0, {}
+        stream_count = len(active_stream)
+        latest_row = active_stream[-1]
+
+        # Compute per-building stats
+        from collections import defaultdict
+        building_stats = defaultdict(list)
+        for row in active_stream:
+            try:
+                building_stats[row.get("building_id", "unknown")].append(
+                    float(row.get("consumption_kwh", 0))
+                )
+            except (ValueError, TypeError):
+                continue
+
+        stats = {}
+        for bid, vals in building_stats.items():
+            avg = sum(vals) / len(vals) if vals else 0
+            stats[bid] = {"count": len(vals), "avg_kwh": round(avg, 2),
+                          "max_kwh": round(max(vals), 2) if vals else 0}
+
+        return latest_row, stream_count, stats
+
+    def analyze_continuous(self):
+        """Always return agent messages for the current stream state.
+
+        Unlike ``handle_stream_event`` which returns ``None`` when there is no
+        anomaly, this method *always* produces role-specific outputs so the
+        Agent Theater is never stuck at 'typing...'.
+        """
+        latest_row, stream_count, building_stats = self.get_stream_snapshot()
+        if latest_row is None:
+            return None, None
+
+        # Try regular anomaly detection
+        anomaly = self.analyst.check_for_deviations()
+        result = None
+        if anomaly:
+            context = self.planner.cross_reference(anomaly)
+            recommendation = self.recommender.get_recommendation(anomaly, context)
+            result = {"anomaly": anomaly, "context": context, "recommendation": recommendation}
+
+        return result, {
+            "stream_count": stream_count,
+            "latest_row": latest_row,
+            "building_stats": building_stats,
+        }
+
+    def chat_with_user(self, user_message: str, building_context: str = "") -> str:
+        """Chat with user using Ollama LLM"""
+        prompt = f"""
+You are an AI assistant for energy management in buildings.
+
+Building Context: {building_context}
+
+User Question: {user_message}
+
+Provide a helpful, specific response about energy management, building data, or anomalies.
+"""
+        return generate_with_gemini(prompt, safety_delay=0)

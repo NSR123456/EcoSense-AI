@@ -75,7 +75,7 @@ def render_homepage():
         <div class="hero-section">
             <div class="hero-title">Smart Energy Guardian</div>
             <div class="hero-subtitle">Turn your campus energy CSV into a live building operations room. Track simulated hours, verify calendar context, and let AI alert you when true waste appears.</div>
-            <div class="hero-pill">Live simulation • schedule-aware • Gemini-powered • Telegram alerts</div>
+            <div class="hero-pill">Live simulation • schedule-aware • Ollama-powered • Telegram alerts</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -94,8 +94,8 @@ def render_homepage():
 
     st.divider()
 
-    st.markdown("### Why this app works for your class project")
-    st.markdown("- **Autonomous audit workflow**: The agents do the work, you build the system.")
+    st.markdown("### Our features")
+    st.markdown("- **Autonomous audit workflow**: The agents do the work, we build the system.")
     st.markdown("- **Context-aware intelligence**: Schedule data makes the AI smarter than raw threshold alerts.")
     st.markdown("- **Low resource, high impact**: Uses cloud APIs sparingly with a demo-ready student laptop profile.")
     st.success("Ready to start your live energy operations demo? Log in from the sidebar to enter the command center.")

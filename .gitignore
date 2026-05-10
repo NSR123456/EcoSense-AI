@@ -2,3 +2,16 @@ data/sample/users.csv
 data/sample/building_metadata.csv
 service_account.json
 .env
+
+__pycache__/
+*.pyc
+*.pkl
+*.zip
+*.exe
+*.pt
+*.pth
+*.bin
+*.safetensors
+checkpoint-*/
+src/models/energy_finetuned/
+src/src/

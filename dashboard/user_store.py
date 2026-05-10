@@ -25,14 +25,14 @@ def _ensure_users_file():
             },
             {
                 "username": "operator1",
-                "password_hash": "ec6e1c25258002eb1c67d15c7f45da7945fa4c58778fd7d88faa5e53e3b4698d",
+                "password_hash": "7d3c6b8d51ac8ec79a2adbf98045944f934c1279a57f689cd5ce997fc223b48e",
                 "role": "operator",
                 "active": 1,
                 "approved": 1,
             },
             {
                 "username": "operator2",
-                "password_hash": "b0047eb4e18d64c5fd32b310f604764da43a61d8a9a742c158fb8f3e6119b869",
+                "password_hash": "2465a128ca302ed5d3a3a2c232fa6895f02c62fb632deb33193ea12d4224dba7",
                 "role": "operator",
                 "active": 1,
                 "approved": 1,

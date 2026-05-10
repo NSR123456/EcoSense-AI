@@ -35,3 +35,4 @@ tensorflow>=2.15.0
 opencv-python>=4.8.0
 pillow>=10.0.0
 schedule>=1.2.0
+ollama>=0.3.0
