@@ -54,8 +54,8 @@ Platform & developer experience
 Python 3.8+, Ollama installed, and a terminal in the repository root.
 
 ```bash
-git clone https://github.com/your-username/ecosense-lg.git
-cd "EcoSense LG"
+git clone https://github.com/your-username/EcoSense-AI.git
+cd "EcoSense-AI"
 python -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt
@@ -83,7 +83,7 @@ All runtime configuration is read from `.env` or environment variables at startu
 
 🔀 Data sources
 
-EcoSense AI works with local sample data, Google Sheets, and optional SQL-backed sources.
+EcoSense-AI works with local sample data, Google Sheets, and optional SQL-backed sources.
 
 Mode | Reads | Writes | When to use
 -----|-------|--------|-----------
@@ -126,7 +126,7 @@ The app brokers user actions through the dashboard to the agent system, which re
 📂 Project layout
 
 ```
-EcoSense AI/
+EcoSense-AI/
 ├─ dashboard/
 │  ├─ app.py
 │  ├─ building_store.py
