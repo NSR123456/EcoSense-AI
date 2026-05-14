@@ -1,225 +1,195 @@
-# EcoSense LG: AI-Powered Energy Management System
+# EcoSense LG
 
-[![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://www.python.org/)
-[![Streamlit](https://img.shields.io/badge/Streamlit-1.30+-red.svg)](https://streamlit.io/)
-[![Ollama](https://img.shields.io/badge/Ollama-0.3+-green.svg)](https://ollama.ai/)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+The AI-powered energy operations cockpit for building owners and operators.
 
-EcoSense LG is an intelligent energy management platform that leverages AI agents and machine learning to monitor, analyze, and optimize building energy consumption. The system provides real-time anomaly detection, proactive recommendations, and automated alerts through Telegram integration.
+EcoSense LG is a modern, opinionated, Streamlit-based interface for energy monitoring, anomaly detection, recommendation generation, and automation. It combines simulated building energy streams, a local Ollama-backed agent theater, Telegram alerts, and Google Sheets persistence to turn raw energy data into actions.
 
-## 🌟 Key Features
+No cloud lock-in. No black-box servers. Your building data stays local — EcoSense LG is the cockpit.
 
-### Core Capabilities
-- **Real-time Energy Monitoring**: Live simulation of building energy consumption with configurable focus on specific buildings
-- **AI-Powered Anomaly Detection**: Multi-agent system using Ollama LLM for intelligent energy pattern analysis
-- **Proactive Recommendations**: Automated generation of energy-saving suggestions based on detected anomalies
-- **Interactive Dashboard**: Streamlit-based web interface for comprehensive energy operations management
+Python 3.8+ · Streamlit 1.30+ · Ollama 0.3+ · MIT · PRs Welcome · Built for sustainable operations
 
-### Advanced Features
-- **Agent Theater**: Watch AI agents collaborate in real-time analysis with generative conversations
-- **Telegram Bot Integration**: Receive instant alerts and control the system via Telegram
-- **Google Sheets Sync**: Cloud-based data persistence and reporting
-- **Multi-Building Support**: Analyze energy patterns across multiple buildings simultaneously
-- **Simulation Engine**: Realistic energy consumption simulation with fault injection capabilities
+Quick Start · Configuration · Data sources · Architecture · Contributing
 
-### Technical Highlights
-- **Local LLM Integration**: Uses Ollama for privacy-preserving, offline AI capabilities
-- **Modular Architecture**: Clean separation of concerns with agents, services, and UI components
-- **Extensible Pipeline**: Pluggable nodes for detection, root cause analysis, action planning, and quality assurance
-- **Database Agnostic**: Supports SQLite, PostgreSQL, and Google Sheets backends
+🚀 Why EcoSense LG
 
-## 🏗️ Architecture
+Building energy management is often split across spreadsheets, ad-hoc alerts, and manual review. Operators need a single place to see what is happening now, why it happened, and what to do next.
+
+EcoSense LG fixes the operations workflow without inventing a new data source.
+
+Legacy energy tooling    | EcoSense LG
+------------------------|-------------------------------------------------
+Static CSV reports      | Live simulation + real-time dashboards
+Manual anomaly rules    | Multi-agent anomaly detection with local LLM
+Delayed recommendations | Proactive energy-saving actions and alerts
+Siloed integrations     | Telegram + Google Sheets + local LLM in one system
+UI for operators        | Streamlit cockpit with agent theater and reports
+
+🎯 Feature matrix
+
+Energy operations
+- ✅ Live building energy simulation with multi-building support
+- ✅ Real-time anomaly detection across consumption patterns
+- ✅ Forecasting and insight generation through generative agents
+- ✅ Fault injection and event-driven energy scenarios
+
+AI agent theater
+- ✅ Multi-agent collaboration for analysis, root cause, planning, and validation
+- ✅ Local Ollama model integration for on-prem inference
+- ✅ Transparent decision flow for operator review
+
+Integrations & automation
+- ✅ Telegram alerts and control integration
+- ✅ Google Sheets sync for cloud persistence and reporting
+- ✅ PDF report generation for energy summaries
+- ✅ Operator roles and admin workflows via Streamlit pages
+
+Platform & developer experience
+- ✅ Modular service architecture with agents, workflows, and helpers
+- ✅ Clean separation of dashboard, agents, and services
+- ✅ Python-first codebase for easy extension and experimentation
+- ✅ Test suite with `pytest` for core logic validation
+
+⚡ Quick start
+
+Python 3.8+, Ollama installed, and a terminal in the repository root.
+
+```bash
+git clone https://github.com/your-username/ecosense-lg.git
+cd "EcoSense LG"
+python -m venv .venv
+.\.venv\Scripts\activate
+pip install -r requirements.txt
+ollama pull llama3.2:1b
+copy .env.example .env
+# edit .env with TELEGRAM_TOKEN, MY_CHAT_ID, GOOGLE_SHEET_ID, GOOGLE_APPLICATION_CREDENTIALS
+streamlit run dashboard/app.py
+```
+
+Open http://localhost:8501 in your browser.
+
+💡 No Telegram or Google Sheets configured? The dashboard still runs with local simulation and Ollama-backed agent reasoning.
+
+🔧 Configuration
+
+Variable | Required | Purpose
+--------|----------|--------
+`TELEGRAM_TOKEN` | No | Telegram bot API token for alerts and control
+`MY_CHAT_ID` | No | Chat ID to send alerts to
+`GOOGLE_SHEET_ID` | No | Google Sheets document ID for data sync
+`GOOGLE_APPLICATION_CREDENTIALS` | No | Path to service account JSON for Google Sheets
+`OLLAMA_MODEL` | No | Ollama model name to use (default: `llama3.2:1b`)
+
+All runtime configuration is read from `.env` or environment variables at startup.
+
+🔀 Data sources
+
+EcoSense LG works with local sample data, Google Sheets, and optional SQL-backed sources.
+
+Mode | Reads | Writes | When to use
+-----|-------|--------|-----------
+Sample data | CSV / in-memory | N/A | Local demos and testing
+Google Sheets | Sheets API | Sheets API | Cloud persistence for reports and logs
+Telegram | N/A | Telegram API | Operator alerts and manual control
+
+Sample datasets live under `data/sample/` so you can get started without external dependencies.
+
+🧠 Local LLM
+
+The system uses Ollama locally for agent reasoning. That means your analysis stays on-premise and does not depend on an external LLM service.
+
+🏗 Architecture
+
+```
+BROWSER / Streamlit UI
+├─ dashboard/app.py
+│  ├─ ui/                # charts, panels, controls
+│  ├─ pages/             # admin and building pages
+│  └─ agent theater
+│
+├─ src/
+│  ├─ agents/            # multi-agent reasoning
+│  ├─ core/              # analytics, digital twin, confidence
+│  ├─ llm/               # Ollama client and fine-tuning helpers
+│  ├─ nodes/             # workflow nodes and pipelines
+│  ├─ rag/               # retrieval and vector search
+│  ├─ services/          # automation, reporting, storage
+│  └─ tools/             # utility helpers and evaluation tools
+│
+├─ integrations/
+│  ├─ Telegram          # alerts and bot control
+│  ├─ Google Sheets     # persistence and reporting
+│  └─ CSV / sample data
+```
+
+The app brokers user actions through the dashboard to the agent system, which reasons over energy data and writes alerts or recommendations to Telegram and Google Sheets.
+
+📂 Project layout
 
 ```
 EcoSense LG/
-├── dashboard/          # Streamlit web interface
-│   ├── app.py         # Main application entry point
-│   ├── ui/            # UI components (charts, theater, etc.)
-│   └── pages/         # Admin and data management pages
-├── src/               # Core application logic
-│   ├── agents/        # AI agent implementations
-│   ├── core/          # Digital twin and analytics
-│   ├── llm/           # LLM client and fine-tuning
-│   ├── nodes/         # Workflow pipeline nodes
-│   ├── rag/           # Retrieval-augmented generation
-│   ├── services/      # Business logic services
-│   └── tools/         # Utility tools
-├── data/              # Sample data and configurations
-├── scripts/           # Utility scripts
-└── tests/             # Test suites
+├─ dashboard/
+│  ├─ app.py
+│  ├─ building_store.py
+│  ├─ pages/
+│  └─ ui/
+├─ data/
+│  └─ sample/
+├─ scripts/
+├─ src/
+│  ├─ agents/
+│  ├─ core/
+│  ├─ ingestion/
+│  ├─ llm/
+│  ├─ nodes/
+│  ├─ rag/
+│  └─ services/
+├─ tests/
+├─ requirements.txt
+├─ README.md
+└─ service_account.json
 ```
 
-## 🚀 Quick Start
+🧰 Tech stack
 
-### Prerequisites
+Layer | Choice | Why
+-----|--------|----
+Framework | Streamlit | fast interactive dashboards for operators
+Language | Python 3.8+ | easy extension and data science ecosystem
+LLM | Ollama | local inference and offline privacy
+UI | Streamlit pages + custom controls | simple, shareable interface
+Messaging | Telegram Bot API | instant operator alerts
+Data | Google Sheets / CSV / sample data | low-friction persistence layer
+Testing | pytest | automated validation for core logic
 
-- **Python 3.8+**
-- **Ollama** (for local LLM capabilities)
-- **Git** (for cloning the repository)
+🛠 Scripts
 
-### Installation
+Command | What it does
+--------|-------------
+`streamlit run dashboard/app.py` | Launch the dashboard locally
+`python -m pytest tests/` | Run the test suite
+`python demo_generative_system.py` | Run a generative system demo
+`python scripts/run_energy_analysis.py` | Run energy analysis workflow
 
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/your-username/ecosense-lg.git
-   cd ecosense-lg
-   ```
+🤝 Contributing
 
-2. **Set up Python environment:**
-   ```bash
-   python -m venv .venv
-   .\.venv\Scripts\activate  # On Windows
-   # source .venv/bin/activate  # On macOS/Linux
-   ```
+PRs welcome — small or large.
 
-3. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Install and configure Ollama:**
-   ```bash
-   # Download Ollama from https://ollama.ai/
-   ollama pull llama3.2:1b
-   ```
-
-5. **Configure environment variables:**
-   Create a `.env` file in the project root:
-   ```env
-   # Telegram Bot (optional)
-   TELEGRAM_TOKEN=your_telegram_bot_token
-   MY_CHAT_ID=your_telegram_chat_id
-
-   # Google Sheets (optional)
-   GOOGLE_SHEET_ID=your_google_sheet_id
-   GOOGLE_APPLICATION_CREDENTIALS=service_account.json
-   ```
-
-### Running the Application
-
-1. **Start the Streamlit dashboard:**
-   ```bash
-   streamlit run dashboard/app.py
-   ```
-
-2. **Access the application:**
-   Open your browser to `http://localhost:8501`
-
-3. **Login credentials:**
-   - **Admin**: `admin` / `admin123`
-   - **Operator 1**: `operator1` / `op1`
-   - **Operator 2**: `operator2` / `op2`
-
-## 📖 Usage Guide
-
-### Dashboard Overview
-
-1. **Login**: Use the credentials above to access the system
-2. **Building Selection**: Choose a specific building or "All Buildings" from the sidebar
-3. **Live Demo**: Start the simulation to see real-time energy monitoring
-4. **Agent Theater**: Observe AI agents analyzing energy patterns
-5. **Telegram Integration**: Receive alerts and control via Telegram bot
-
-### Key Workflows
-
-#### Energy Anomaly Detection
-1. Start live simulation
-2. Agents automatically analyze energy streams
-3. View results in Agent Theater
-4. Receive Telegram alerts for anomalies
-
-#### Building-Specific Analysis
-1. Select target building from sidebar
-2. Restart simulation for focused analysis
-3. Review building-specific insights
-
-#### Report Generation
-1. Access admin panel (admin role required)
-2. Generate PDF reports with energy analytics
-
-## 🔧 Configuration
-
-### Environment Variables
-
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `TELEGRAM_TOKEN` | Telegram bot API token | No |
-| `MY_CHAT_ID` | Telegram chat ID for alerts | No |
-| `GOOGLE_SHEET_ID` | Google Sheets document ID | No |
-| `GOOGLE_APPLICATION_CREDENTIALS` | Path to service account JSON | No |
-
-### Simulation Settings
-
-Modify `src/services/simulator.py` to adjust:
-- Simulation speed (seconds per hour)
-- Fault injection frequency
-- Data filtering parameters
-
-## 🤖 AI Agents
-
-EcoSense LG employs a sophisticated multi-agent system:
-
-- **Analyst Agent**: Detects energy consumption anomalies
-- **Planner Agent**: Cross-references anomalies with schedules
-- **Recommender Agent**: Generates actionable energy-saving recommendations
-- **Action Planner**: Creates implementation plans
-- **Critic Agent**: Quality assurance and validation
-- **Synthesizer Agent**: Final decision synthesis
-
-All agents leverage Ollama's local LLM for intelligent analysis.
-
-## 🧪 Testing
-
-Run the test suite:
-```bash
+git clone https://github.com/<your-fork>/ecosense-lg.git
+cd "EcoSense LG"
+git checkout -b feat/<short-name>
+# …make your changes…
 python -m pytest tests/
-```
+git commit -m "feat(agent): add recommendation summary"
+git push origin feat/<short-name>
 
-## 📊 Data Sources
+Open a PR against `main`. Attach a screenshot or screen recording for any UI change.
 
-The system includes sample datasets:
-- `data/sample/building_energy_multi.csv`: Multi-building energy consumption data
-- `data/sample/users.csv`: User account management
-- `data/sample/building_metadata.csv`: Building specifications
+Conventional commit prefixes: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `test:`.
 
-## 🤝 Contributing
+📜 License & credits
 
-We welcome contributions! Please follow these steps:
+MIT © EcoSense LG
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+Built on Streamlit, Ollama, Telegram, and the Python data ecosystem.
 
-### Development Guidelines
-
-- Follow PEP 8 style guidelines
-- Add tests for new features
-- Update documentation as needed
-- Ensure compatibility with Python 3.8+
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## 🙋 Support
-
-For questions, issues, or contributions:
-
-- **Issues**: [GitHub Issues](https://github.com/your-username/ecosense-lg/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/your-username/ecosense-lg/discussions)
-- **Email**: your-email@example.com
-
-## 🔄 Changelog
-
-### [v1.0.0] - 2026-05-11
-- Initial release with core energy management features
-- Ollama LLM integration
-- Multi-agent analysis system
-- Streamlit dashboard
-- Telegram bot integration
-
----
-
-**Built with ❤️ for sustainable energy management**
+If EcoSense LG helps your team save energy, ⭐ star the repo — that is how it finds its next user.
