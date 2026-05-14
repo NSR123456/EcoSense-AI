@@ -188,8 +188,8 @@ Conventional commit prefixes: `feat:`, `fix:`, `refactor:`, `docs:`, `chore:`, `
 
 📜 License & credits
 
-MIT © EcoSense LG
+MIT © EcoSense-AI
 
 Built on Streamlit, Ollama, Telegram, and the Python data ecosystem.
 
-If EcoSense LG helps your team save energy, ⭐ star the repo — that is how it finds its next user.
+If EcoSense-AI helps your team save energy, ⭐ star the repo — that is how it finds its next user.
