@@ -1,8 +1,8 @@
-# EcoSense LG
+# EcoSense AI
 
 The AI-powered energy operations cockpit for building owners and operators.
 
-EcoSense LG is a modern, opinionated, Streamlit-based interface for energy monitoring, anomaly detection, recommendation generation, and automation. It combines simulated building energy streams, a local Ollama-backed agent theater, Telegram alerts, and Google Sheets persistence to turn raw energy data into actions.
+EcoSense AI is a modern, opinionated, Streamlit-based interface for energy monitoring, anomaly detection, recommendation generation, and automation. It combines simulated building energy streams, a local Ollama-backed agent theater, Telegram alerts, and Google Sheets persistence to turn raw energy data into actions.
 
 No cloud lock-in. No black-box servers. Your building data stays local — EcoSense LG is the cockpit.
 
@@ -10,13 +10,13 @@ Python 3.8+ · Streamlit 1.30+ · Ollama 0.3+ · MIT · PRs Welcome · Built for
 
 Quick Start · Configuration · Data sources · Architecture · Contributing
 
-🚀 Why EcoSense LG
+🚀 Why EcoSense AI
 
 Building energy management is often split across spreadsheets, ad-hoc alerts, and manual review. Operators need a single place to see what is happening now, why it happened, and what to do next.
 
 EcoSense LG fixes the operations workflow without inventing a new data source.
 
-Legacy energy tooling    | EcoSense LG
+Legacy energy tooling    | EcoSense AI
 ------------------------|-------------------------------------------------
 Static CSV reports      | Live simulation + real-time dashboards
 Manual anomaly rules    | Multi-agent anomaly detection with local LLM
@@ -83,7 +83,7 @@ All runtime configuration is read from `.env` or environment variables at startu
 
 🔀 Data sources
 
-EcoSense LG works with local sample data, Google Sheets, and optional SQL-backed sources.
+EcoSense AI works with local sample data, Google Sheets, and optional SQL-backed sources.
 
 Mode | Reads | Writes | When to use
 -----|-------|--------|-----------
@@ -126,7 +126,7 @@ The app brokers user actions through the dashboard to the agent system, which re
 📂 Project layout
 
 ```
-EcoSense LG/
+EcoSense AI/
 ├─ dashboard/
 │  ├─ app.py
 │  ├─ building_store.py
@@ -174,8 +174,8 @@ Command | What it does
 
 PRs welcome — small or large.
 
-git clone https://github.com/<your-fork>/ecosense-lg.git
-cd "EcoSense LG"
+git clone https://github.com/<your-fork>/EcoSense-AI.git
+cd "EcoSense-AI"
 git checkout -b feat/<short-name>
 # …make your changes…
 python -m pytest tests/
