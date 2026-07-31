@@ -19,7 +19,7 @@ if ROOT not in sys.path:
 from src.tools.analytics_tools import get_building_bundle
 from src.tools.evaluation_tools import evaluate_response
 from src.tools.reporting_tools import build_pdf, send_report_email
-from src.llm.client import generate_with_gemini
+from src.llm.client import generate_with_gemini, set_active_model
 
 from dashboard.ui.homepage import render_homepage
 from dashboard.ui.decision_cards import (
@@ -34,6 +34,7 @@ from dashboard.ui.v2_realtime import render_v2_realtime_ui
 from dashboard.ui.charts import render_consumption_chart, render_issue_bar
 from dashboard.ui.app_shell import inject_theme, render_assistant_brief, render_top_header
 from dashboard.ui.admin_ops import render_session_badge
+from dashboard.ui.model_comparison import render_model_comparison
 from dashboard.building_store import all_building_ids, load_energy_dataset
 from dashboard.paths import METADATA_PATH
 from dashboard.user_store import authenticate
@@ -692,24 +693,28 @@ def _start_telegram_bot_polling() -> None:
     """Start the Telegram bot polling loop in a background thread."""
     if "live_telegram" not in st.session_state:
         return
-    
+
     telegram_bot = st.session_state.live_telegram
     if not telegram_bot.is_configured():
         print("Telegram: Not configured (missing TOKEN or CHAT_ID). Polling not started.")
         return
-    
-    # Stop existing bot if running
-    if telegram_bot.running:
-        print("Telegram: Bot already running, stopping first...")
-        telegram_bot.stop_bot()
-    
+
+    existing_thread = st.session_state.get("telegram_polling_thread")
+    if existing_thread is not None and existing_thread.is_alive():
+        print("Telegram: polling thread already active. Skipping restart.")
+        return
+
+    if telegram_bot.running and telegram_bot.application is not None:
+        print("Telegram: bot already running. Skipping duplicate start.")
+        return
+
     def telegram_polling_thread():
         try:
             print("[TELEGRAM] Starting bot polling in background...")
             telegram_bot.run_bot()
         except Exception as e:
             print(f"[TELEGRAM] Polling error: {e}")
-    
+
     thread = threading.Thread(target=telegram_polling_thread, daemon=True)
     thread.start()
     st.session_state.telegram_polling_started = True
@@ -816,6 +821,25 @@ def _start_live_demo() -> None:
     simulator = st.session_state.live_simulator
     agent_team = st.session_state.live_agent_team
     telegram_bot = st.session_state.live_telegram
+
+    stream_df = simulator.df if hasattr(simulator, "df") else pd.DataFrame()
+    if stream_df.empty and selected_building not in (None, "", "All"):
+        fallback_df = load_energy_dataset().copy()
+        if not fallback_df.empty and "building_id" in fallback_df.columns:
+            fallback_df["building_id"] = fallback_df["building_id"].astype(str).str.strip()
+            fallback_df = fallback_df[fallback_df["building_id"] == str(selected_building)]
+            stream_df = fallback_df
+            simulator.df = stream_df
+
+    valid_rows = len(stream_df) if hasattr(stream_df, "__len__") else 0
+    if valid_rows == 0:
+        st.warning(
+            f"Live Demo cannot start because the simulator has no valid stream rows for building '{selected_building}'. "
+            "Check the selected building and dataset normalization."
+        )
+        return
+
+    st.info(f"Live Demo starting with {valid_rows} valid stream rows for building '{selected_building}'.")
 
     def on_update(payload):
         # Continuous analysis: agents always produce messages, not just on anomaly
@@ -968,7 +992,16 @@ with st.sidebar:
     previous_building = st.session_state.get("selected_building", "All")
     
     selected_building = st.selectbox("Focus on building", ["All"] + building_ids, index=0)
-    
+
+    # LLM model selector for agent explanations and comparison
+    selected_ai_model = st.selectbox(
+        "AI model (LLM) for explanations",
+        ["llama3.2:1b", "qwen-7b", "mistral-7b"],
+        index=0,
+        key="selected_ai_model",
+    )
+    set_active_model(selected_ai_model)
+
     # Check if building selection changed
     if previous_building != selected_building:
         st.session_state["selected_building"] = selected_building
@@ -1007,6 +1040,9 @@ with st.sidebar:
         else:
             st.warning("Start the live demo first to initialize Telegram.")
 
+    if st.button("📊 Compare Detection Models", use_container_width=True, help="Run synthetic evaluations and compare model metrics"):
+        st.session_state["show_model_comparison"] = True
+
     st.markdown("---")
     run_status = "RUNNING" if st.session_state.get("sim_running") else "IDLE"
     st.write(f"**Simulation state:** {run_status}")
@@ -1035,23 +1071,18 @@ with st.sidebar:
         st.caption("Admin tools are available to administrators.")
 
     st.markdown("---")
-    st.caption("Need Telegram alerts? Fill in `TELEGRAM_TOKEN` and `MY_CHAT_ID` in .env.")
 
 # Build the live operations room view
 selected_building_display = selected_building if selected_building != "All" else "All Buildings"
-st.markdown(
-    f"""
-    <div class='ecosense-header-bar'>
-        <div>
-            <div class='ecosense-title'>Smart Energy Guardian</div>
-            <div class='ecosense-sub'>Live operations room for campus energy, schedule-aware waste detection, and proactive Telegram alerts.</div>
-            <div class='ecosense-sub' style='margin-top: 4px; font-size: 0.8rem; opacity: 0.9;'>Focus: {selected_building_display}</div>
-        </div>
-        <div class='ecosense-pill'>Live monitoring enabled</div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+st.markdown("### Smart Energy Guardian")
+st.write("Live operations room for campus energy, schedule-aware waste detection, and proactive Telegram alerts.")
+st.caption(f"Focus: {selected_building_display}")
+st.markdown("---")
+
+# If the user requested model comparison, render that view and exit early
+if st.session_state.get("show_model_comparison"):
+    render_model_comparison(st.session_state.get("selected_ai_model", "ollama"))
+    st.stop()
 
 # Summary KPIs from the Digital Twin
 live_db = dashboard_db

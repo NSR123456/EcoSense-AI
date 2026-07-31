@@ -52,7 +52,10 @@ def main():
     db.seed_campus_schedule()
 
     # 4. Initialize Components
-    csv_path = os.path.join(ROOT, "data", "sample", "building_energy.csv")
+    csv_path = os.getenv(
+        "SIMULATION_CSV_PATH",
+        os.path.join(ROOT, "data", "sample", "ecosense_train_hourly.csv"),
+    )
     simulator = EnergySimulator(csv_path, db)
     agent_team = AgentTeam(db)
     telegram_bot = TelegramBot(db, simulator, agent_team)

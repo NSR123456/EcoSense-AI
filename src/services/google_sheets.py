@@ -1,4 +1,6 @@
 import os
+import datetime
+from pathlib import Path
 import pandas as pd
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -8,7 +10,8 @@ import google_auth_httplib2
 import httplib2
 from dotenv import load_dotenv
 
-load_dotenv()
+ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(dotenv_path=ROOT / ".env")
 
 class DatabaseManager:
     FALLBACK_STORAGE = {
@@ -27,16 +30,40 @@ class DatabaseManager:
         self.sheet_id = os.getenv("GOOGLE_SHEET_ID")
         self.creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "service_account.json")
         self.creds = None
-        if os.path.exists(self.creds_path):
-            try:
-                self.creds = service_account.Credentials.from_service_account_file(
-                    self.creds_path, scopes=["https://www.googleapis.com/auth/spreadsheets"]
-                )
-            except Exception as e:
-                print(f"Google Sheets credentials could not be loaded: {e}")
+        self._load_credentials()
+
+    def _load_credentials(self):
+        candidate_paths = [
+            Path(self.creds_path),
+            Path(__file__).resolve().parent.parent / self.creds_path,
+            Path.cwd() / self.creds_path,
+            ROOT / self.creds_path,
+        ]
+
+        for candidate in candidate_paths:
+            if candidate.exists():
+                try:
+                    self.creds = service_account.Credentials.from_service_account_file(
+                        str(candidate), scopes=["https://www.googleapis.com/auth/spreadsheets"]
+                    )
+                    print(f"Google Sheets credentials loaded from: {candidate}")
+                    return
+                except Exception as e:
+                    print(f"Google Sheets credentials could not be loaded from {candidate}: {e}")
+
+        print(
+            "Google Sheets credential file not found or could not be loaded. "
+            f"Tried: {', '.join(str(p) for p in candidate_paths)}"
+        )
 
     def is_ready(self) -> bool:
-        return bool(self.sheet_id and self.creds)
+        ready = bool(self.sheet_id and self.creds)
+        if not ready:
+            print(
+                "Google Sheets is not ready. "
+                f"sheet_id set: {bool(self.sheet_id)}, creds loaded: {bool(self.creds)}"
+            )
+        return ready
 
     def _get_service(self):
         """Create a thread-safe service instance for each request."""
@@ -80,6 +107,19 @@ class DatabaseManager:
                     self.write_rows(tab_name, [headers])
                 else:
                     print(f"Tab already exists: {tab_name}")
+                    try:
+                        header_range = f"{tab_name}!A1:Z1"
+                        header_response = service.spreadsheets().values().get(
+                            spreadsheetId=self.sheet_id,
+                            range=header_range
+                        ).execute()
+                        existing_headers = header_response.get("values", [[ ]])[0]
+                    except HttpError:
+                        existing_headers = []
+
+                    if existing_headers != headers:
+                        print(f"Restoring headers for existing tab: {tab_name}")
+                        self.write_headers(tab_name, headers)
 
         except HttpError as err:
             print(f"An error occurred during workspace init: {err}")
@@ -103,6 +143,21 @@ class DatabaseManager:
         except HttpError as err:
             print(f"An error occurred writing headers to {tab_name}: {err}")
 
+    def _normalize_cell(self, value):
+        if value is None:
+            return ""
+        # Convert pandas Timestamp and similar objects that provide to_pydatetime()
+        if hasattr(value, "to_pydatetime"):
+            try:
+                py_dt = value.to_pydatetime()
+                return py_dt.isoformat()
+            except Exception:
+                # Fallback to string conversion
+                return str(value)
+        if isinstance(value, (datetime.datetime, datetime.date)):
+            return value.isoformat()
+        return value
+
     def _prepare_rows(self, tab_name, rows):
         if not rows:
             return []
@@ -112,13 +167,13 @@ class DatabaseManager:
             headers = self.TAB_HEADERS.get(tab_name)
             if headers:
                 for row in rows:
-                    normalized.append([row.get(col, "") for col in headers])
+                    normalized.append([self._normalize_cell(row.get(col, "")) for col in headers])
             else:
                 for row in rows:
-                    normalized.append([row.get(col, "") for col in row.keys()])
+                    normalized.append([self._normalize_cell(row.get(col, "")) for col in row.keys()])
         else:
             for row in rows:
-                normalized.append(list(row))
+                normalized.append([self._normalize_cell(cell) for cell in row])
         return normalized
 
     def write_rows(self, tab_name, rows):
@@ -134,17 +189,33 @@ class DatabaseManager:
             return
 
         body = {"values": rows}
-        range_name = f"{tab_name}!A1"
+        range_name = f"{tab_name}!A1:Z"
         try:
             service = self._get_service()
             service.spreadsheets().values().append(
                 spreadsheetId=self.sheet_id,
                 range=range_name,
                 valueInputOption="RAW",
-                body=body
+                insertDataOption="INSERT_ROWS",
+                body=body,
             ).execute()
+            print(f"Google Sheets: appended {len(rows)} rows to {tab_name}.")
         except HttpError as err:
             print(f"An error occurred writing to {tab_name}: {err}")
+            try:
+                print("Retrying write after refreshing workspace...")
+                self.initialize_workspace()
+                service = self._get_service()
+                service.spreadsheets().values().append(
+                    spreadsheetId=self.sheet_id,
+                    range=range_name,
+                    valueInputOption="RAW",
+                    insertDataOption="INSERT_ROWS",
+                    body=body,
+                ).execute()
+                print(f"Google Sheets: appended {len(rows)} rows to {tab_name} on retry.")
+            except Exception as retry_err:
+                print(f"Write retry failed for {tab_name}: {retry_err}")
 
     def clear_tab(self, tab_name):
         """Clear all data and force-restore headers from known config."""

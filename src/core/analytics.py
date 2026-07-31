@@ -1,5 +1,58 @@
 import numpy as np
 import pandas as pd
+from sklearn.ensemble import IsolationForest
+
+
+def detect_anomalies_with_ml(values, contamination=0.05, window_size=12):
+    """Use a rolling IsolationForest to detect anomalous points in a time series."""
+    series = np.asarray(values, dtype=float)
+    labels = np.zeros(len(series), dtype=bool)
+
+    if len(series) < window_size + 1:
+        return labels
+
+    for idx in range(window_size, len(series)):
+        history = series[idx - window_size:idx]
+        if len(history) < 4:
+            continue
+
+        training_features = []
+        for i in range(1, len(history)):
+            previous_window = history[max(0, i - 3):i]
+            if len(previous_window) < 2:
+                continue
+            training_features.append([
+                history[i - 1],
+                previous_window.mean(),
+                previous_window.std(ddof=0),
+                history[i - 1] - previous_window.mean(),
+            ])
+
+        if len(training_features) < 2:
+            continue
+
+        model = IsolationForest(contamination=contamination, random_state=42)
+        model.fit(np.asarray(training_features, dtype=float))
+
+        recent_window = history[-3:]
+        recent_mean = float(recent_window.mean())
+        recent_std = float(recent_window.std(ddof=0)) or 1e-6
+        current_value = float(series[idx])
+        deviation = abs(current_value - recent_mean) / recent_std
+
+        if deviation > 4.0:
+            labels[idx] = True
+            continue
+
+        current_feature = np.array([[
+            current_value,
+            recent_mean,
+            recent_std,
+            current_value - recent_mean,
+        ]], dtype=float)
+        labels[idx] = model.predict(current_feature)[0] == -1
+
+    return labels
 
 
 def _safe_scalar(bdf: pd.DataFrame, col: str) -> float | None:
@@ -43,7 +96,10 @@ def compute_building_metrics(bdf: pd.DataFrame) -> dict:
         slope = 0.0
         trend = "stable"
 
-    if std_val > 0:
+    if len(values) >= 8:
+        anomaly_mask = detect_anomalies_with_ml(values.to_numpy(), window_size=12)
+        anomaly_count = int(anomaly_mask.sum())
+    elif std_val > 0:
         z_scores = np.abs((values - avg_val) / std_val)
         anomaly_count = int((z_scores > 2).sum())
     else:

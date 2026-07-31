@@ -16,6 +16,19 @@ class EnergySimulator:
             if not self.is_running: break
             
             payload = row.to_dict()
+            # Ensure date/timestamp is JSON-serializable
+            date_val = payload.get("date")
+            if hasattr(date_val, "to_pydatetime"):
+                try:
+                    payload["date"] = date_val.to_pydatetime().isoformat()
+                except Exception:
+                    payload["date"] = str(date_val)
+            elif hasattr(date_val, "isoformat"):
+                try:
+                    payload["date"] = date_val.isoformat()
+                except Exception:
+                    payload["date"] = str(date_val)
+
             # 1. Sync to Google Sheets
             self.db.write_rows("Active_Stream", [list(payload.values())])
             

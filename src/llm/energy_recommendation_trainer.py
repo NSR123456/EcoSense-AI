@@ -72,9 +72,10 @@ class EnergyRecommendationTrainer:
         
         # Load historical data for context
         try:
-            df = pd.read_csv('data/sample/building_energy.csv')
+            csv_path = os.getenv("ENERGY_CSV_PATH", "data/sample/ecosense_train_hourly.csv")
+            df = pd.read_csv(csv_path)
             buildings = df['building_id'].unique()
-        except:
+        except Exception:
             buildings = ['Building_A', 'Building_B', 'Building_C', 'Building_D', 'Building_E']
         
         # Generate training examples

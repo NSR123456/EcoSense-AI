@@ -1,6 +1,7 @@
 import os
 import requests
 from telegram import Update
+from telegram.error import Conflict
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 from dotenv import load_dotenv
 
@@ -290,9 +291,8 @@ class TelegramBot:
             print("Telegram: No token found. Bot will not run.")
             return
 
-        # Stop existing instance if running
-        if self.running:
-            self.stop_bot()
+        if self.running and self.application is not None:
+            print("Telegram: Bot already running. Skipping duplicate start.")
             return
 
         try:
@@ -315,6 +315,10 @@ class TelegramBot:
             self.running = True
             print("Telegram: Bot starting...")
             self.application.run_polling()
+        except Conflict as e:
+            print(f"Telegram: Bot polling conflict detected. Another bot instance is using this token: {e}")
+            self.running = False
+            self.application = None
         except Exception as e:
             print(f"Telegram: Bot error: {e}")
             self.running = False

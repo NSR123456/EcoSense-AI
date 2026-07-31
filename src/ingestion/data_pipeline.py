@@ -20,8 +20,9 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker
 import uvicorn
-from sklearn.preprocessing import StandardScaler
 import numpy as np
+
+from src.core.analytics import detect_anomalies_with_ml
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -118,9 +119,10 @@ class BuildingMetadataInput(BaseModel):
 
 # Anomaly Detection
 class AnomalyDetector:
-    def __init__(self):
-        self.scalers: Dict[str, StandardScaler] = {}
+    def __init__(self, contamination: float = 0.05, min_history: int = 12):
         self.history: Dict[str, List[float]] = {}
+        self.contamination = contamination
+        self.min_history = min_history
 
     def update_history(self, sensor_key: str, value: float, max_history: int = 100):
         if sensor_key not in self.history:
@@ -130,23 +132,18 @@ class AnomalyDetector:
             self.history[sensor_key].pop(0)
 
     def detect_anomaly(self, sensor_key: str, value: float, threshold: float = 3.0) -> bool:
-        if sensor_key not in self.history or len(self.history[sensor_key]) < 10:
-            self.update_history(sensor_key, value)
-            return False  # Not enough data for anomaly detection
-
-        if sensor_key not in self.scalers:
-            self.scalers[sensor_key] = StandardScaler()
-
-        # Fit scaler on history
-        history_array = np.array(self.history[sensor_key]).reshape(-1, 1)
-        self.scalers[sensor_key].fit(history_array)
-
-        # Check if current value is anomalous
-        scaled_value = self.scalers[sensor_key].transform([[value]])[0][0]
-        is_anomaly = abs(scaled_value) > threshold
-
         self.update_history(sensor_key, value)
-        return is_anomaly
+
+        history = self.history[sensor_key]
+        if len(history) < self.min_history + 1:
+            return False
+
+        labels = detect_anomalies_with_ml(
+            history,
+            contamination=self.contamination,
+            window_size=self.min_history,
+        )
+        return bool(labels[-1])
 
 anomaly_detector = AnomalyDetector()
 

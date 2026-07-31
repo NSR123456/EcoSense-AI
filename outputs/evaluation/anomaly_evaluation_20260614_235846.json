@@ -1,0 +1,77 @@
+{
+  "timestamp": "20260614_235846",
+  "framework": "EcoSense",
+  "evaluation_type": "Simulated / Demonstration",
+  "evaluation_configuration": {
+    "num_runs": 5,
+    "samples_per_run": 900,
+    "injection_rate": 0.2
+  },
+  "aggregated_metrics": {
+    "precision": 0.991,
+    "recall": 0.3633,
+    "f1_score": 0.5313
+  },
+  "per_run_results": [
+    {
+      "total_samples": 900,
+      "total_injected_faults": 180,
+      "true_positives": 66,
+      "false_positives": 1,
+      "false_negatives": 114,
+      "true_negatives": 719,
+      "precision": 0.9851,
+      "recall": 0.3667,
+      "f1_score": 0.5344,
+      "specificity": 0.9986
+    },
+    {
+      "total_samples": 900,
+      "total_injected_faults": 180,
+      "true_positives": 64,
+      "false_positives": 0,
+      "false_negatives": 116,
+      "true_negatives": 720,
+      "precision": 1.0,
+      "recall": 0.3556,
+      "f1_score": 0.5246,
+      "specificity": 1.0
+    },
+    {
+      "total_samples": 900,
+      "total_injected_faults": 180,
+      "true_positives": 60,
+      "false_positives": 0,
+      "false_negatives": 120,
+      "true_negatives": 720,
+      "precision": 1.0,
+      "recall": 0.3333,
+      "f1_score": 0.5,
+      "specificity": 1.0
+    },
+    {
+      "total_samples": 900,
+      "total_injected_faults": 180,
+      "true_positives": 64,
+      "false_positives": 2,
+      "false_negatives": 116,
+      "true_negatives": 718,
+      "precision": 0.9697,
+      "recall": 0.3556,
+      "f1_score": 0.5203,
+      "specificity": 0.9972
+    },
+    {
+      "total_samples": 900,
+      "total_injected_faults": 180,
+      "true_positives": 73,
+      "false_positives": 0,
+      "false_negatives": 107,
+      "true_negatives": 720,
+      "precision": 1.0,
+      "recall": 0.4056,
+      "f1_score": 0.5771,
+      "specificity": 1.0
+    }
+  ]
+}

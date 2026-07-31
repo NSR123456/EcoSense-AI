@@ -20,7 +20,12 @@ def render_v2_realtime_ui(db: DatabaseManager | None = None, focus_building: str
         st.info("Streaming live energy data from Google Sheets and monitoring with autonomous agents.")
     with col_refresh:
         if st.button("🔄 Refresh Data", use_container_width=True):
-            st.experimental_rerun()
+            if hasattr(st, "rerun"):
+                st.rerun()
+            elif hasattr(st, "experimental_rerun"):
+                st.experimental_rerun()
+            else:
+                st.session_state["live_realtime_refresh"] = st.session_state.get("live_realtime_refresh", 0) + 1
 
     if db is None:
         db = DatabaseManager()

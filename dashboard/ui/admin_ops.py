@@ -104,7 +104,7 @@ def render_building_data_admin(
 
     with t1:
         meta = load_metadata()
-        st.caption("Edit cells or add rows. Save applies to building_metadata.csv.")
+        st.caption("Edit cells or add rows. Save applies to ecosystem metadata file.")
         edited = st.data_editor(
             meta,
             num_rows="dynamic",
