@@ -4,9 +4,6 @@
 
 # EcoSense LG — AI-Powered Energy Operations Cockpit
 
-
-# EcoSense LG — AI-Powered Energy Operations Cockpit
-
 [![Python Version](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.30%2B-red.svg)](https://streamlit.io/)
 [![Ollama](https://img.shields.io/badge/Ollama-Local%20LLM-black.svg)](https://ollama.ai/)
@@ -17,10 +14,6 @@
 EcoSense-AI is a modern, opinionated, Streamlit-based interface for energy monitoring, anomaly detection, recommendation generation, and automation. It combines simulated building energy streams, a local Ollama-backed agent theater, Telegram alerts, and Google Sheets persistence to turn raw energy data into actions.
 
 No cloud lock-in. No black-box servers. Your building data stays local — EcoSense-AI is the cockpit.
-
-
-## 1. Project Description
-
 
 ## 1. Project Description
 
