@@ -2,7 +2,7 @@
 
 # EcoSense-AI
 
-# EcoSense LG — AI-Powered Energy Operations Cockpit
+# AI-Powered Energy Operations Cockpit
 
 [![Python Version](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.30%2B-red.svg)](https://streamlit.io/)
@@ -17,7 +17,7 @@ No cloud lock-in. No black-box servers. Your building data stays local — EcoSe
 
 ## 1. Project Description
 
-**EcoSense LG** is an AI-powered, privacy-first energy management and decision-support cockpit designed for building owners, facility managers, and energy operators. It transforms raw building consumption data into real-time operational insights, anomaly alerts, and actionable recommendations.
+**EcoSense-AI** is an AI-powered, privacy-first energy management and decision-support cockpit designed for building owners, facility managers, and energy operators. It transforms raw building consumption data into real-time operational insights, anomaly alerts, and actionable recommendations.
 
 ### The Problem
 Traditional Building Energy Management Systems (BEMS) rely on static spreadsheets or rigid rule-based alerts that generate excessive false alarms or fail to provide actionable context when energy anomalies occur.
@@ -26,7 +26,7 @@ Traditional Building Energy Management Systems (BEMS) rely on static spreadsheet
 🚀 Why EcoSense-AI
 
 ### The Solution
-EcoSense LG combines real-world building telemetry, statistical anomaly detection, time-series forecasting, multiple Large Language Model (LLM) backends, custom dataset file uploads, and instant multi-channel alerting. EcoSense LG ingests energy readings (from pre-loaded datasets or custom uploaded `.csv` files), injects random real-time anomalies for testing, orchestrates a multi-agent analysis flow, presents transparent reasoning inside a Streamlit Agent Theater, and dispatches critical alerts to Telegram and Google Sheets.
+EcoSense-AI combines real-world building telemetry, statistical anomaly detection, time-series forecasting, multiple Large Language Model (LLM) backends, custom dataset file uploads, and instant multi-channel alerting. EcoSense LG ingests energy readings (from pre-loaded datasets or custom uploaded `.csv` files), injects random real-time anomalies for testing, orchestrates a multi-agent analysis flow, presents transparent reasoning inside a Streamlit Agent Theater, and dispatches critical alerts to Telegram and Google Sheets.
 
 ### 📌 Dataset Origin & Custom Upload Support
 All baseline sample energy consumption data under `data/sample/` (`ecosense_train_hourly.csv`, `ecosense_metadata.csv`) are collected directly from the **Great ASHRAE Energy Predictor III Competition** on the **Kaggle platform** (15 selected buildings). In addition, operators can upload custom building `.csv` files directly via the frontend to run identical simulation and agent reasoning flows on their own energy consumption records.
@@ -45,7 +45,7 @@ UI for operators        | Streamlit cockpit with agent theater and reports
 
 ## 2. Features and Functionality
 
-EcoSense LG is organized into core functional modules:
+EcoSense-AI is organized into core functional modules:
 
 ### ⚡ Data Ingestion, Custom CSV Upload & Random Anomaly Simulation
 - **Custom CSV Upload Option**: Frontend sidebar uploader allowing facility operators to upload any building `.csv` consumption dataset (`building_id`, `date`/`timestamp`, `consumption_kwh`/`meter_reading`) for live simulation and agent reasoning.
@@ -84,7 +84,7 @@ EcoSense LG is organized into core functional modules:
 
 ## 3. Tools Used
 
-EcoSense LG is built using a modern Python-centric software stack:
+EcoSense-AI is built using a modern Python-centric software stack:
 
 | Category | Technology / Library | Purpose & Role |
 | :--- | :--- | :--- |
