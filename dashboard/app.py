@@ -30,12 +30,13 @@ from dashboard.ui.decision_cards import (
 from dashboard.ui.agent_theater import render_agent_theater
 from dashboard.ui.evidence_panel import render_evidence_panel
 from dashboard.ui.simulator_panel import render_simulator_panel
+from dashboard.ui.forecasting_panel import render_forecasting_suite
 from dashboard.ui.v2_realtime import render_v2_realtime_ui
 from dashboard.ui.charts import render_consumption_chart, render_issue_bar
 from dashboard.ui.app_shell import inject_theme, render_assistant_brief, render_top_header
 from dashboard.ui.admin_ops import render_session_badge
 from dashboard.ui.model_comparison import render_model_comparison
-from dashboard.building_store import all_building_ids, load_energy_dataset
+from dashboard.building_store import all_building_ids, clear_dataset_cache, load_energy_dataset
 from dashboard.paths import METADATA_PATH
 from dashboard.user_store import authenticate
 from src.services.automation_services import update_visualization_alert
@@ -1202,8 +1203,9 @@ with status_col2:
 st.markdown("---")
 
 # Live operations tabs
-live_tab, theater_tab, twin_tab, alerts_tab = st.tabs([
+live_tab, forecast_tab, theater_tab, twin_tab, alerts_tab = st.tabs([
     "Live Ops",
+    "Forecasting",
     "Agent Theater",
     "Digital Twin",
     "Telegram"
@@ -1219,6 +1221,151 @@ with live_tab:
 
 # Always re-analyze when stream grows (runs every Streamlit cycle)
 _auto_analyze_existing_active_stream()
+
+with forecast_tab:
+    forecast_results = render_forecasting_suite(
+        stream_data=active_stream,
+        selected_building=selected_building,
+        days_ahead=7,
+    )
+
+    st.markdown("---")
+    st.markdown("#### 📨 Operator Brief Distribution")
+    st.caption(
+        "Summarises the maintenance schedule, anomaly counts, and building focus, then e-mails the brief "
+        "to every operator account registered in the user store via ``send_report_email`` "
+        "(logs the action to ``outputs/automation/email_logs.csv``)."
+    )
+
+    def _count_anomalies(histories):
+        try:
+            from src.core.analytics import detect_anomalies_with_ml
+            total = 0
+            for _, sdf in histories.items():
+                values = pd.to_numeric(sdf["value"], errors="coerce").fillna(0).tolist()
+                if len(values) < 6:
+                    continue
+                labels = detect_anomalies_with_ml(values)
+                total += sum(1 for l in labels if int(l) == 1)
+            return total
+        except Exception:
+            return 0
+
+    def _summarise_forecast_for_email(fr: dict) -> str:
+        if not fr:
+            return "No equipment-forecast data available for this operator brief."
+        lines = ["Equipment health forecast summary:"]
+        priorities = []
+        for sname, res in fr.items():
+            sch = res.get("schedule", {}) or {}
+            pred = res.get("prediction", {}) or {}
+            d2f = pred.get("days_to_failure")
+            if d2f is None:
+                lines.append(f"  • {sname}: healthy — no failure predicted within the 7-day forecast window.")
+                priorities.append(("low", sname))
+            else:
+                p = sch.get("priority", "low")
+                priorities.append((p, sname))
+                lines.append(
+                    f"  • {sname}: predicted failure in ~{int(round(float(d2f)))} days "
+                    f"(priority={p}, action={sch.get('action', 'routine_check')})."
+                )
+        criticals = [s for p, s in priorities if p == "critical"]
+        highs = [s for p, s in priorities if p == "high"]
+        if criticals:
+            lines.append(f"CRITICAL action items today: {', '.join(criticals)}.")
+        if highs:
+            lines.append(f"High-priority items this week: {', '.join(highs)}.")
+        return "\n".join(lines)
+
+    fc1, fc2 = st.columns([2, 1])
+    with fc1:
+        if st.button("📨 Send Operator Briefs (All Operators)", type="primary", use_container_width=True,
+                     help="E-mails the maintenance forecast & anomaly summary to every operator account, then logs the action."):
+            try:
+                from dashboard.user_store import list_operator_accounts
+                ops = list_operator_accounts()
+            except Exception:
+                ops = []
+
+            if not ops:
+                st.warning("No operator accounts were found. Use the Admin → Operators page to create them.")
+            else:
+                anomaly_count = _count_anomalies(
+                    {s: r["history_df"] for s, r in forecast_results.items()} if forecast_results else {}
+                )
+                forecast_summary = _summarise_forecast_for_email(forecast_results)
+
+                # Build a minimal report payload for build_pdf + send_report_email
+                focus_label = selected_building if selected_building != "All" else "All Buildings"
+                brief_data = {
+                    "building_id": focus_label,
+                    "data_summary": {
+                        "data_points": len(active_stream),
+                        "forecast_sensors": len(forecast_results or {}),
+                        "anomaly_count": anomaly_count,
+                    },
+                    "analysis": {
+                        "issues_found": sum(
+                            1 for r in (forecast_results or {}).values()
+                            if (r.get("prediction", {}) or {}).get("days_to_failure") is not None
+                        ),
+                    },
+                    "recommendations": {
+                        "recommendations_count": len(forecast_results or {}),
+                        "executive_summary": forecast_summary,
+                    },
+                    "compliance": {"compliant": True},
+                    "alerts_generated": 0,
+                }
+
+                progress = st.progress(0, text=f"Preparing briefs for {len(ops)} operator(s)...")
+                ok_count = 0
+                for idx, operator in enumerate(ops, start=1):
+                    try:
+                        user_name = operator.get("username") or operator.get("email") or f"operator_{idx}"
+                        user_email = operator.get("email") or f"{user_name}@ecosense.local"
+                        pdf_path = build_pdf(brief_data)
+                        # send_report_email returns (ok, message) or bool depending on the build; tolerate either
+                        result = send_report_email(brief_data, pdf_path, user_email)
+                        if isinstance(result, tuple):
+                            ok = bool(result[0])
+                        else:
+                            ok = bool(result)
+                        if ok:
+                            ok_count += 1
+                    except Exception as send_exc:
+                        print(f"[OperatorBrief] failed to send to {operator}: {send_exc}")
+                    progress.progress(idx / len(ops), text=f"Sent {idx}/{len(ops)} operator briefs...")
+
+                if ok_count == len(ops):
+                    st.success(
+                        f"✅ Operator briefs dispatched to all {ok_count} operator account(s). "
+                        f"Anomaly summary: {anomaly_count} recent anomalies. "
+                        f"Summary logged to outputs/automation/email_logs.csv."
+                    )
+                else:
+                    st.warning(
+                        f"⚠️ Sent {ok_count}/{len(ops)} operator briefs. "
+                        "Check the user store and smtp/console fallback for the skipped rows."
+                    )
+
+    with fc2:
+        try:
+            from dashboard.user_store import list_operator_accounts
+            operator_list = list_operator_accounts()
+        except Exception:
+            operator_list = []
+        st.metric("Operator recipients", len(operator_list))
+        if operator_list:
+            with st.expander("Recipient list", expanded=False):
+                for op in operator_list:
+                    st.markdown(
+                        f"• **{op.get('username', '—')}** — "
+                        f"`{op.get('email', op.get('username', 'unknown') + '@ecosense.local')}`"
+                    )
+        else:
+            st.info("No operator accounts visible yet. Use the Admin → Operators page to register operators.")
 
 with theater_tab:
     # Auto-refresh every 4 seconds so new messages from background thread appear

@@ -109,91 +109,134 @@ class PredictiveMaintenanceModel:
             days_ahead: Number of days to forecast
 
         Returns:
-            Dict with prediction results or None if no model
+            Dict with prediction results or None if no model.
+            Keys returned (all present for both failure & normal states, with
+            ``None`` fillers where not applicable so the UI caller has a stable schema):
+
+            - ``sensor_key``
+            - ``days_to_failure``  (int or None)
+            - ``predicted_failure_time``  (ISO str or None, also available via alias ``predicted_failure_date``)
+            - ``predicted_value``  (float or None)
+            - ``threshold``  (float or None)
+            - ``confidence_score``  (float 0..1, also available via alias ``confidence``)
+            - ``failure_reason``  (human-readable str or None)
+            - ``forecast``  (Prophet forecast DataFrame or None)
+            - ``status``  (``'normal'`` or ``'failure_predicted'``)
         """
+        base_result = {
+            'sensor_key': sensor_key,
+            'days_to_failure': None,
+            'predicted_failure_time': None,
+            'predicted_failure_date': None,
+            'predicted_value': None,
+            'threshold': self.thresholds.get(sensor_key),
+            'confidence_score': 0.0,
+            'confidence': 0.0,
+            'failure_reason': None,
+            'forecast': None,
+            'status': 'normal',
+        }
+
         if sensor_key not in self.models and sensor_key not in self.thresholds:
             return None
 
         try:
-            threshold = self.thresholds.get(sensor_key)
+            threshold = base_result['threshold']
             if not threshold:
-                return None
+                return base_result
 
-            # If Prophet model exists, use it
+            forecast_df = None
+            exceeding_points = None
+
             if sensor_key in self.models and PROPHET_AVAILABLE:
                 model = self.models[sensor_key]
                 future_dates = pd.date_range(
                     start=datetime.now(),
-                    periods=days_ahead * 24,  # Hourly predictions
+                    periods=days_ahead * 24,
                     freq='H'
                 )
                 future_df = pd.DataFrame({'ds': future_dates})
-                forecast = model.predict(future_df)
-                exceeding_points = forecast[forecast['yhat_upper'] > threshold]
+                forecast_df = model.predict(future_df)
+                exceeding_points = forecast_df[forecast_df['yhat_upper'] > threshold]
             else:
-                # Fallback: Simple threshold check
                 exceeding_points = None
+
+            base_result['forecast'] = forecast_df
 
             if exceeding_points is not None and not exceeding_points.empty:
                 first_exceedance = exceeding_points.iloc[0]
-                days_to_failure = (first_exceedance['ds'] - datetime.now()).days
+                exceed_ts = first_exceedance['ds']
+                days_to_failure = (exceed_ts - datetime.now()).days
+                d2f_clamped = max(1, days_to_failure)
+                pred_value = float(first_exceedance['yhat'])
+                confidence = float(min(0.95, 1 - abs(pred_value - threshold) / threshold))
+                fail_ts_iso = exceed_ts.isoformat() if hasattr(exceed_ts, 'isoformat') else str(exceed_ts)
 
-                return {
-                    'sensor_key': sensor_key,
-                    'predicted_failure_date': first_exceedance['ds'].isoformat(),
-                    'days_to_failure': max(1, days_to_failure),
-                    'predicted_value': first_exceedance['yhat'],
-                    'threshold': threshold,
-                    'confidence': min(0.95, 1 - abs(first_exceedance['yhat'] - threshold) / threshold)
-                }
+                base_result.update({
+                    'days_to_failure': d2f_clamped,
+                    'predicted_failure_time': fail_ts_iso,
+                    'predicted_failure_date': fail_ts_iso,
+                    'predicted_value': pred_value,
+                    'confidence_score': confidence,
+                    'confidence': confidence,
+                    'failure_reason': f'Predicted {sensor_key} reading of {pred_value:.2f} exceeds failure threshold {threshold:.2f} in ~{d2f_clamped} day(s).',
+                    'status': 'failure_predicted',
+                })
+                return base_result
 
-            return {
-                'sensor_key': sensor_key,
-                'status': 'normal',
-                'next_check_days': days_ahead
-            }
+            return base_result
 
         except Exception as e:
             logger.error(f"Failed to predict for {sensor_key}: {e}")
-            return None
+            return base_result
 
     def get_maintenance_schedule(self, sensor_key: str) -> Optional[Dict]:
         """
         Generate maintenance schedule based on predictions.
 
-        Returns:
-            Dict with recommended maintenance actions
+        Returns a dict with stable keys consumed by the forecasting panel:
+        ``action``, ``priority``, ``schedule_days`` (int), ``scheduled_date`` (ISO date str
+        or ``None`` for routine checks), ``reason``.
         """
-        prediction = self.predict_failure(sensor_key)
-        if not prediction or prediction.get('status') == 'normal':
+        prediction = self.predict_failure(sensor_key) or {}
+        d2f = prediction.get('days_to_failure')
+
+        def _sched_date(days_offset: int) -> str:
+            return (datetime.now() + timedelta(days=days_offset)).strftime('%Y-%m-%d')
+
+        if not prediction or prediction.get('status') == 'normal' or d2f is None:
             return {
                 'action': 'routine_check',
                 'priority': 'low',
-                'schedule_days': 30
+                'schedule_days': 30,
+                'scheduled_date': _sched_date(30),
+                'reason': 'No failure predicted within the current forecast window.'
             }
 
-        days_to_failure = prediction['days_to_failure']
-
-        if days_to_failure <= 1:
+        if d2f <= 1:
             return {
                 'action': 'emergency_maintenance',
                 'priority': 'critical',
                 'schedule_days': 0,
-                'reason': f'Predicted failure in {days_to_failure} day(s)'
+                'scheduled_date': _sched_date(0),
+                'reason': prediction.get('failure_reason') or f'Predicted failure in {d2f} day(s)'
             }
-        elif days_to_failure <= 3:
+        elif d2f <= 3:
             return {
                 'action': 'urgent_maintenance',
                 'priority': 'high',
-                'schedule_days': days_to_failure,
-                'reason': f'Predicted failure in {days_to_failure} day(s)'
+                'schedule_days': d2f,
+                'scheduled_date': _sched_date(d2f),
+                'reason': prediction.get('failure_reason') or f'Predicted failure in {d2f} day(s)'
             }
         else:
+            sched_days = max(7, d2f - 3)
             return {
                 'action': 'preventive_maintenance',
                 'priority': 'medium',
-                'schedule_days': max(7, days_to_failure - 3),
-                'reason': f'Predicted failure in {days_to_failure} day(s)'
+                'schedule_days': sched_days,
+                'scheduled_date': _sched_date(sched_days),
+                'reason': prediction.get('failure_reason') or f'Predicted failure in {d2f} day(s)'
             }
 
     def update_model(self, sensor_key: str, new_data: List[Dict]) -> bool:

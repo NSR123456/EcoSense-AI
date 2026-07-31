@@ -99,3 +99,32 @@ def authenticate(username: str, password: str) -> tuple[bool, str]:
         if not is_active_row(ap):
             return False, "pending"
     return True, role
+
+
+def list_operator_accounts() -> list[dict]:
+    """Return all active, approved operator accounts ready to receive e-mail briefs.
+
+    Each record contains at least ``username``, ``role``, ``active``, ``approved``,
+    and an ``email`` field (derived from the username if no e-mail column is present).
+    """
+
+    users = load_users()
+    if users.empty:
+        return []
+
+    operators = users[users["role"].astype(str).str.lower() == "operator"].copy()
+    operators = operators[operators["active"].apply(is_active_row)]
+    operators = operators[operators["approved"].apply(is_active_row)]
+
+    if "email" not in operators.columns:
+        operators["email"] = ""
+
+    records = operators.to_dict(orient="records")
+    for rec in records:
+        uname = str(rec.get("username") or "").strip()
+        email_val = str(rec.get("email") or "").strip()
+        if not email_val and "@" not in uname:
+            rec["email"] = f"{uname}@ecosense.local"
+        elif not email_val:
+            rec["email"] = uname
+    return records
