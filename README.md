@@ -42,8 +42,6 @@ Manual anomaly rules    | Multi-agent anomaly detection with local LLM
 Delayed recommendations | Proactive energy-saving actions and alerts
 Siloed integrations     | Telegram + Google Sheets + local LLM in one system
 UI for operators        | Streamlit cockpit with agent theater and reports
-=======
----
 
 ## 2. Features and Functionality
 
@@ -81,7 +79,7 @@ EcoSense LG is organized into core functional modules:
 ### 💻 Streamlit Cockpit UI
 - Modern dashboard equipped with live metric cards, consumption charts, building selection dropdowns, simulation speed controls, and agent thought logs.
 
----
+
 
 ## 3. Tools Used
 
@@ -98,7 +96,7 @@ EcoSense LG is built using a modern Python-centric software stack:
 | **Alerting & Cloud Sync** | Telegram Bot API (`requests`), Google Sheets API (`gspread`) | Real-time mobile alert notifications and cloud audit log persistence (`Audit_Ledger`). |
 | **Testing & Benchmarking** | Pytest, Custom `StreamingEvaluator` | Automated unit testing, grounding validation, and streaming performance benchmarks. |
 
----
+
 
 ## 4. My Contribution and Learning as a CS Student
 
@@ -130,7 +128,6 @@ As a Computer Science student, building **EcoSense LG** provided hands-on experi
    - Implemented `src/evaluation/streaming_evaluator.py` to evaluate anomaly detection metrics (Precision, Recall, F1-Score, Latency) over 900 streamed records across multiple runs.
    - Achieved a high-precision baseline (**99.1% Precision**), minimizing false alarms for operational staff.
 
----
 
 ### Key CS Learnings & Engineering Takeaways
 
@@ -140,7 +137,6 @@ As a Computer Science student, building **EcoSense LG** provided hands-on experi
 - **Statistical Anomaly Detection Trade-offs**: Learned the practical trade-offs between High Precision (reducing operator false alarm fatigue) and High Recall (catching every minor fault) in safety-critical industrial settings.
 - **Full-Stack AI Application Development**: Experience bridging backend data science pipelines with interactive frontend user interfaces using Streamlit.
 
----
 
 ## 5. Project Workflow
 
