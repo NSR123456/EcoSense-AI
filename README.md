@@ -1,30 +1,28 @@
-<<<<<<< HEAD
+
 # EcoSense-AI
-=======
+
 # EcoSense LG — AI-Powered Energy Operations Cockpit
->>>>>>> 6ccb26a (Several updates in data processing)
+
 
 [![Python Version](https://img.shields.io/badge/Python-3.8%2B-blue.svg)](https://www.python.org/)
 [![Streamlit](https://img.shields.io/badge/Streamlit-1.30%2B-red.svg)](https://streamlit.io/)
 [![Ollama](https://img.shields.io/badge/Ollama-Local%20LLM-black.svg)](https://ollama.ai/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-<<<<<<< HEAD
+
 EcoSense-AI is a modern, opinionated, Streamlit-based interface for energy monitoring, anomaly detection, recommendation generation, and automation. It combines simulated building energy streams, a local Ollama-backed agent theater, Telegram alerts, and Google Sheets persistence to turn raw energy data into actions.
 
 No cloud lock-in. No black-box servers. Your building data stays local — EcoSense-AI is the cockpit.
-=======
----
+
 
 ## 1. Project Description
->>>>>>> 6ccb26a (Several updates in data processing)
+
 
 **EcoSense LG** is an AI-powered, privacy-first energy management and decision-support cockpit designed for building owners, facility managers, and energy operators. It transforms raw building consumption data into real-time operational insights, anomaly alerts, and actionable recommendations.
 
 ### The Problem
 Traditional Building Energy Management Systems (BEMS) rely on static spreadsheets or rigid rule-based alerts that generate excessive false alarms or fail to provide actionable context when energy anomalies occur.
 
-<<<<<<< HEAD
 🚀 Why EcoSense-AI
 =======
 ### The Solution
@@ -34,7 +32,7 @@ EcoSense LG combines real-world building telemetry, statistical anomaly detectio
 ### 📌 Dataset Origin & Benchmark Note
 All baseline building energy consumption data under the `data/sample/` directory (`ecosense_train_hourly.csv`, `ecosense_metadata.csv`) are collected directly from the **Great ASHRAE Energy Predictor III Competition** on the **Kaggle platform**. A curated sample of **15 buildings** (spanning Office, Education, Lodging/Residential, Public Services, Entertainment, and Religious Worship use types) was selected to represent realistic multi-building energy streams for simulation and testing.
 
-<<<<<<< HEAD
+
 EcoSense-AI fixes the operations workflow without inventing a new data source.
 
 Legacy energy tooling    | EcoSense-AI
@@ -48,7 +46,6 @@ UI for operators        | Streamlit cockpit with agent theater and reports
 ---
 
 ## 2. Features and Functionality
->>>>>>> 6ccb26a (Several updates in data processing)
 
 EcoSense LG is organized into core functional modules:
 
@@ -217,17 +214,16 @@ flowchart TD
 
 ### Setup & Execution
 
-```bash
-<<<<<<< HEAD
-git clone https://github.com/your-username/EcoSense-AI.git
+
+git clone https://github.com/NSR123456/EcoSense-AI.git
 cd "EcoSense-AI"
-=======
+
 # 1. Clone the repository
-git clone https://github.com/your-username/ecosense-lg.git
+git clone https://github.com/NSR123456/ecosense-lg.git
 cd "EcoSense LG"
 
 # 2. Create and activate a virtual environment
->>>>>>> 6ccb26a (Several updates in data processing)
+
 python -m venv .venv
 .\.venv\Scripts\activate
 
@@ -239,22 +235,22 @@ ollama pull llama3.2:1b
 
 # 5. Launch the Streamlit Cockpit
 streamlit run dashboard/app.py
-```
+
 
 ### Running Tests & Evaluation
 
-<<<<<<< HEAD
-💡 No Telegram or Google Sheets configured? The dashboard still runs with local simulation and Ollama-backed agent reasoning.
+
+💡 No Telegram or Google Sheets configured? Complete the configuration in codebase .env file.
 
 🔧 Configuration
 
 Variable | Required | Purpose
 --------|----------|--------
-`TELEGRAM_TOKEN` | No | Telegram bot API token for alerts and control
-`MY_CHAT_ID` | No | Chat ID to send alerts to
-`GOOGLE_SHEET_ID` | No | Google Sheets document ID for data sync
-`GOOGLE_APPLICATION_CREDENTIALS` | No | Path to service account JSON for Google Sheets
-`OLLAMA_MODEL` | No | Ollama model name to use (default: `llama3.2:1b`)
+`TELEGRAM_TOKEN` | Yes | Telegram bot API token for alerts and control
+`MY_CHAT_ID` | Yes | Chat ID to send alerts to
+`GOOGLE_SHEET_ID` | Yes | Google Sheets document ID for data sync
+`GOOGLE_APPLICATION_CREDENTIALS` | Yes | Path to service account JSON for Google Sheets
+`OLLAMA_MODEL` | Yes | Ollama model name to use (default: `llama3.2:1b`)
 
 All runtime configuration is read from `.env` or environment variables at startup.
 
@@ -358,7 +354,7 @@ git checkout -b feat/<short-name>
 =======
 ```bash
 # Run unit test suite
->>>>>>> 6ccb26a (Several updates in data processing)
+
 python -m pytest tests/
 
 # Run Agent Theater Grounding tests
@@ -366,18 +362,14 @@ python scripts/run_grounding_tests.py
 
 # Run Anomaly Detection Streaming Benchmark
 python scripts/run_anomaly_evaluation.py --num-samples 900 --injection-rate 0.2 --runs 5
-```
 
----
-
-<<<<<<< HEAD
 MIT © EcoSense-AI
 
 Built on Streamlit, Ollama, Telegram, and the Python data ecosystem.
 
 If EcoSense-AI helps your team save energy, ⭐ star the repo — that is how it finds its next user.
-=======
+
 ## 📜 License
 
 Distributed under the **MIT License**. See `LICENSE` for more information.
->>>>>>> 6ccb26a (Several updates in data processing)
+
