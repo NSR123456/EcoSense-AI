@@ -3,26 +3,38 @@
 from __future__ import annotations
 
 import os
-
+import sys
+from pathlib import Path
 import pandas as pd
 import streamlit as st
 
-import sys
-
 from dashboard.paths import METADATA_PATH, ROOT
-from src.ingestion.data_loader import load_dataset
+from src.ingestion.data_loader import load_dataset, _normalize_energy_frame
 
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 
 @st.cache_data
-def load_energy_dataset():
+def _load_cached_energy_dataset(custom_path: str | None = None) -> pd.DataFrame:
+    if custom_path and os.path.exists(custom_path):
+        try:
+            cdf = pd.read_csv(custom_path)
+            norm = _normalize_energy_frame(cdf)
+            if not norm.empty:
+                return norm
+        except Exception as e:
+            print(f"Failed to load custom uploaded dataset at {custom_path}: {e}")
     return load_dataset()
 
 
+def load_energy_dataset() -> pd.DataFrame:
+    custom_path = st.session_state.get("custom_csv_path") if hasattr(st, "session_state") else None
+    return _load_cached_energy_dataset(custom_path)
+
+
 def clear_dataset_cache() -> None:
-    load_energy_dataset.clear()
+    _load_cached_energy_dataset.clear()
 
 
 def load_metadata() -> pd.DataFrame:

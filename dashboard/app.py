@@ -746,7 +746,8 @@ def _restart_simulation_with_new_building() -> None:
     st.session_state.live_db.seed_campus_schedule()
     
     selected_building = st.session_state.get("selected_building", "All")
-    st.session_state.live_simulator = EnergySimulator(db_manager=st.session_state.live_db, focus_building=selected_building)
+    custom_csv = st.session_state.get("custom_csv_path")
+    st.session_state.live_simulator = EnergySimulator(csv_path=custom_csv, db_manager=st.session_state.live_db, focus_building=selected_building)
     
     # Reinitialize Telegram bot with new simulator
     if "live_agent_team" not in st.session_state:
@@ -781,13 +782,16 @@ def _start_live_demo() -> None:
     
     # Get selected building from session state or sidebar
     selected_building = st.session_state.get("selected_building", "All")
+    custom_csv = st.session_state.get("custom_csv_path")
     
     if "live_simulator" not in st.session_state:
-        st.session_state.live_simulator = EnergySimulator(db_manager=st.session_state.live_db, focus_building=selected_building)
+        st.session_state.live_simulator = EnergySimulator(csv_path=custom_csv, db_manager=st.session_state.live_db, focus_building=selected_building)
     else:
-        # Update simulator with new building selection if changed
-        if st.session_state.live_simulator.focus_building != selected_building:
-            st.session_state.live_simulator = EnergySimulator(db_manager=st.session_state.live_db, focus_building=selected_building)
+        # Update simulator with new building selection or new custom_csv if changed
+        sim_csv = getattr(st.session_state.live_simulator, "csv_path", None)
+        expected_csv = Path(custom_csv) if custom_csv else Path("data/sample/ecosense_train_hourly.csv")
+        if st.session_state.live_simulator.focus_building != selected_building or (sim_csv and sim_csv != expected_csv):
+            st.session_state.live_simulator = EnergySimulator(csv_path=custom_csv, db_manager=st.session_state.live_db, focus_building=selected_building)
             st.session_state["agent_messages"] = []
             st.session_state["latest_analysis_result"] = None
             st.session_state["agent_theater_prev_msg_count"] = 0
@@ -957,8 +961,9 @@ dashboard_db = st.session_state["dashboard_db"]
 if st.session_state.get("auth_user"):
     # Get selected building from session state (will be set below)
     selected_building = st.session_state.get("selected_building", "All")
+    custom_csv = st.session_state.get("custom_csv_path")
     if "live_simulator" not in st.session_state:
-        st.session_state.live_simulator = EnergySimulator(db_manager=dashboard_db, focus_building=selected_building)
+        st.session_state.live_simulator = EnergySimulator(csv_path=custom_csv, db_manager=dashboard_db, focus_building=selected_building)
     if "live_agent_team" not in st.session_state:
         st.session_state.live_agent_team = AgentTeam(db_manager=dashboard_db)
 
@@ -986,6 +991,52 @@ with st.sidebar:
     st.markdown(
         "This is your live energy operations room. Monitor the simulated meter stream, review AI agent decisions, and use Telegram alerts to stay ahead of true waste."
     )
+    st.markdown("---")
+
+    # Upload custom building energy CSV file
+    with st.expander("📁 Upload Custom Building Energy CSV", expanded=bool(st.session_state.get("custom_csv_path"))):
+        st.caption("Upload a `.csv` file containing building energy consumption records for simulation & agent reasoning.")
+        uploaded_csv = st.file_uploader(
+            "Select CSV file",
+            type=["csv"],
+            key="custom_energy_csv_uploader",
+            help="CSV must include columns for building_id, date/timestamp, and consumption_kwh/meter_reading."
+        )
+        if uploaded_csv is not None:
+            try:
+                upload_dir = os.path.join(ROOT, "data", "sample")
+                os.makedirs(upload_dir, exist_ok=True)
+                target_custom_path = os.path.join(upload_dir, "uploaded_custom.csv")
+                with open(target_custom_path, "wb") as f:
+                    f.write(uploaded_csv.getvalue())
+
+                raw_cdf = pd.read_csv(target_custom_path)
+                from src.ingestion.data_loader import _normalize_energy_frame
+                norm_cdf = _normalize_energy_frame(raw_cdf)
+
+                if norm_cdf.empty:
+                    st.error("Invalid CSV format. Ensure required columns exist: building_id, date (or timestamp), and consumption_kwh (or meter_reading).")
+                else:
+                    if st.session_state.get("custom_csv_path") != target_custom_path:
+                        st.session_state["custom_csv_path"] = target_custom_path
+                        clear_dataset_cache()
+                        st.session_state["selected_building"] = "All"
+                        _reset_live_demo()
+                        st.success(f"Loaded '{uploaded_csv.name}' ({len(norm_cdf)} rows across {len(norm_cdf['building_id'].unique())} building(s))!")
+                        st.rerun()
+            except Exception as ex:
+                st.error(f"Failed to process CSV file: {ex}")
+
+        if st.session_state.get("custom_csv_path"):
+            st.info(f"Active Data Source: Custom CSV ({os.path.basename(st.session_state['custom_csv_path'])})")
+            if st.button("🔄 Reset to Default Dataset", key="reset_csv_source_btn", use_container_width=True):
+                st.session_state["custom_csv_path"] = None
+                clear_dataset_cache()
+                st.session_state["selected_building"] = "All"
+                _reset_live_demo()
+                st.success("Reset to default Kaggle ASHRAE energy dataset.")
+                st.rerun()
+
     st.markdown("---")
 
     # Get previous building selection to detect changes
